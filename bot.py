@@ -43,10 +43,15 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 async def setup_hook():
     # --- CONEXÃO COM O BANCO DE DADOS ---
     print("Conectando ao Supabase...")
-    # Criamos o pool e salvamos dentro do próprio 'bot' (bot.db). 
-    # Assim, qualquer comando em qualquer arquivo (Cog) poderá acessar o banco usando self.bot.db!
-    bot.db = await asyncpg.create_pool(DATABASE_URL, ssl='require')
+    
+    bot.db = await asyncpg.create_pool(
+        DATABASE_URL, 
+        ssl='require',
+        statement_cache_size=0 
+    )
+    
     print("Banco de dados conectado com sucesso! 🗄️")
+
     # --- CARREGANDO OS COMANDOS ---
     print("Procurando comandos na pasta...")
     # Entra na pasta 'comandos' e lista todos os arquivos lá dentro
