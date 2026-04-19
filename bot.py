@@ -5,6 +5,7 @@ import discord                  # A biblioteca principal para interagir com o Di
 from discord.ext import commands # A extensão que facilita a criação de comandos com prefixos (como !ola).
 import os                       # Uma ferramenta nativa do Python para conversar com o seu Sistema Operacional (ex: ler variáveis do seu PC).
 from dotenv import load_dotenv  # A biblioteca que instalamos para ler o arquivo secreto '.env'.
+import asyncpg
 
 from comandos.exame import FormularioView # Importa os botões e lista de opções do comando de exame, para que sejam persistentes.
 # ==========================================
@@ -17,6 +18,7 @@ load_dotenv()
 # os.getenv() vai nessa "memória oculta" e busca a chave exata chamada 'DISCORD_TOKEN'.
 # Agora, a variável TOKEN guarda a sua senha, mas sem expor ela no código!
 TOKEN = os.getenv('DISCORD_TOKEN')
+DATABASE_URL = os.getenv('DATABASE_URL')
 
 # ==========================================
 # 3. INTENÇÕES (INTENTS)
@@ -39,6 +41,13 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 # ==========================================
 # O setup_hook é uma função especial que roda logo antes do bot ligar de verdade.
 async def setup_hook():
+    # --- CONEXÃO COM O BANCO DE DADOS ---
+    print("Conectando ao Supabase...")
+    # Criamos o pool e salvamos dentro do próprio 'bot' (bot.db). 
+    # Assim, qualquer comando em qualquer arquivo (Cog) poderá acessar o banco usando self.bot.db!
+    bot.db = await asyncpg.create_pool(DATABASE_URL, ssl='require')
+    print("Banco de dados conectado com sucesso! 🗄️")
+    # --- CARREGANDO OS COMANDOS ---
     print("Procurando comandos na pasta...")
     # Entra na pasta 'comandos' e lista todos os arquivos lá dentro
     for filename in os.listdir('./comandos'):
