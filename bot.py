@@ -6,6 +6,7 @@ from discord.ext import commands # A extensão que facilita a criação de coman
 import os                       # Uma ferramenta nativa do Python para conversar com o seu Sistema Operacional (ex: ler variáveis do seu PC).
 from dotenv import load_dotenv  # A biblioteca que instalamos para ler o arquivo secreto '.env'.
 
+from comandos.exame import FormularioView # Importa os botões e lista de opções do comando de exame, para que sejam persistentes.
 # ==========================================
 # 2. SEGURANÇA E CONFIGURAÇÃO (O Cofre)
 # ==========================================
