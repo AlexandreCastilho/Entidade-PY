@@ -65,7 +65,7 @@ class ExameModal(discord.ui.Modal):
 # ==========================================
 # 2. A INTERFACE (A Bandeja e o Botão)
 # ==========================================
-class FormularioView(discord.ui.View):
+class ExameView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
 
@@ -133,7 +133,7 @@ class Exame(commands.Cog):
             title= 'Participe da Staff!',
             description= 'Faça a sua parte e ajude a administrar o seu clã e sua aliança!\nEscolha quantas opções quiser no menu abaixo!'
         )
-        await ctx.send(embed=embed, view=FormularioView())
+        await ctx.send(embed=embed, view=ExameView())
 
 async def setup(bot):
     await bot.add_cog(Exame(bot))
