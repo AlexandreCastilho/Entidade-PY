@@ -40,25 +40,33 @@ class SeletorCargoSilenciado(discord.ui.RoleSelect):
         )
 
     async def callback(self, interaction: discord.Interaction):
-        # SEGURANÇA: Verifica se quem clicou é administrador (caso a mensagem seja pública)
         if not interaction.permissions.administrator:
             return await interaction.response.send_message("❌ Apenas administradores podem alterar configurações.", ephemeral=True)
 
         cargo_selecionado = self.values[0]
-        guild_id = interaction.guild.id
+        guild_id = int(interaction.guild.id)
 
-        # Atualização no Banco de Dados
-        await interaction.client.db.execute(
-            'UPDATE servers SET cargo_silenciado = $1 WHERE id = $2',
-            str(cargo_selecionado.id), guild_id
-        )
+        print(f"⚙️ [CONFIG] Administrador selecionou o cargo: {cargo_selecionado.name}")
 
-        # Mensagem agora é pública (ephemeral=False)
+        try:
+            # 1. Atualização no Banco de Dados
+            await interaction.client.db.execute(
+                'UPDATE servers SET cargo_silenciado = $1 WHERE id = $2',
+                cargo_selecionado.id, guild_id
+            )
+            print("💾 [CONFIG] Banco de dados atualizado com sucesso!")
+            
+            # 2. Atualização no Cache em Memória
+            interaction.client.cache_silenciados[guild_id] = int(cargo_selecionado.id)
+            print(f"🧠 [CONFIG] Memória do bot atualizada! Cargo salvo: {interaction.client.cache_silenciados.get(guild_id)}")
+            
+        except Exception as e:
+            print(f"🚨 [ERRO NO CONFIG]: {e}")
+
         await interaction.response.send_message(
             f"📢 **Configuração Atualizada:** O cargo de silenciamento agora é {cargo_selecionado.mention}.", 
             ephemeral=False
         )
-
 
 class SeletorCanalDenuncia(discord.ui.ChannelSelect):
     def __init__(self):
@@ -95,21 +103,26 @@ class SeletorCanalAutoMod(discord.ui.ChannelSelect):
         )
 
     async def callback(self, interaction: discord.Interaction):
+        if not interaction.permissions.administrator:
+            return await interaction.response.send_message("❌ Apenas administradores podem alterar configurações.", ephemeral=True)
 
-            cargo_selecionado = self.values[0]
-            guild_id = interaction.guild.id
+        canal_selecionado = self.values[0]
+        guild_id = interaction.guild.id
 
-            await interaction.client.db.execute(
-                'UPDATE servers SET cargo_silenciado = $1 WHERE id = $2',
-                str(cargo_selecionado.id), guild_id
-            )
+        # 1. A CORREÇÃO: Estava salvando na coluna errada! Agora salva no 'canal_auto_mod'
+        await interaction.client.db.execute(
+            'UPDATE servers SET canal_auto_mod = $1 WHERE id = $2',
+            canal_selecionado.id, guild_id
+        )
 
-            interaction.client.cache_silenciados[guild_id] = cargo_selecionado.id
+        # 2. A CORREÇÃO: Atualiza o cache de CANAIS (e não de cargos como estava antes)
+        interaction.client.cache_automod[guild_id] = canal_selecionado.id
 
-            await interaction.response.send_message(
-                f"✅ Cargo de silenciamento definido para: **{cargo_selecionado.name}**", 
-                ephemeral=False
-            )
+        await interaction.response.send_message(
+            f"📢 **Configuração Atualizada:** O canal de auto moderação agora é {canal_selecionado.mention}.", 
+            ephemeral=False
+        )
+
 # ==========================================
 # 2. O LAYOUT V2 (Estrutura Visual)
 # ==========================================
