@@ -5,9 +5,8 @@ import asyncpg
 from dotenv import load_dotenv
 
 # Importações de persistência
-# Nota: Certifique-se de que a classe no seu arquivo exame.py se chama 'ExameView' mesmo. 
-# Se for a antiga, pode ser que se chame 'FormularioView'.
 from comandos.exame import ExameView
+from comandos.denuncia import DenunciaView # Importamos a nova View aqui!
 
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
@@ -17,49 +16,50 @@ intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 async def setup_hook():
-    # 1. CONEXÃO COM O BANCO DE DADOS (Isso estava faltando!)
+    # 1. CONEXÃO COM O BANCO DE DADOS
     print("Conectando ao Supabase...")
     bot.db = await asyncpg.create_pool(DATABASE_URL, ssl='require', statement_cache_size=0)
     print("Banco de dados conectado! 🗄️")
 
-    # 2. CARREGANDO O CACHE
-    print("Sincronizando cache com o banco de dados...")
+    # 2. SINCRONIZAÇÃO DO TRIO DE CACHES (AutoMod, Silenciados e Denúncias)
+    print("Sincronizando caches integrados...")
     bot.cache_automod = {}
     bot.cache_silenciados = {}
+    bot.cache_denuncias = {} # Novo cache centralizado
     
-    # Buscamos todos os dados da tabela servers
-    registros = await bot.db.fetch('SELECT id, canal_auto_mod, cargo_silenciado FROM servers')
+    # Buscamos todas as colunas de configuração em uma única consulta SQL
+    registros = await bot.db.fetch('SELECT id, canal_auto_mod, cargo_silenciado, canal_denuncias FROM servers')
     
     for reg in registros:
-        # Garantimos que a CHAVE (id do servidor) seja um número inteiro
         guild_id = int(reg['id'])
         
+        # Preenchemos cada "gaveta" do cache se o valor existir no banco
         if reg['canal_auto_mod']:
             bot.cache_automod[guild_id] = int(reg['canal_auto_mod'])
             
         if reg['cargo_silenciado']:
             bot.cache_silenciados[guild_id] = int(reg['cargo_silenciado'])
-            
-    print(f"✅ Cache sincronizado: {len(bot.cache_automod)} canais e {len(bot.cache_silenciados)} cargos carregados.")
 
-    # 3. CARREGANDO PASTAS (Comandos, Slash, Eventos)
+        if reg['canal_denuncias']:
+            bot.cache_denuncias[guild_id] = int(reg['canal_denuncias'])
+            
+    print(f"✅ Cache Trio Sincronizado: {len(bot.cache_automod)} AutoMod | {len(bot.cache_silenciados)} Cargos | {len(bot.cache_denuncias)} Denúncias")
+
+    # 3. CARREGAMENTO DINÂMICO DE PASTAS
     pastas = ['./comandos', './slash', './eventos']
     
     for pasta in pastas:
-        print(f"Carregando módulos de: {pasta}")
-        # Só tenta carregar a pasta se ela existir, para evitar erros
         if os.path.exists(pasta):
+            print(f"Carregando módulos de: {pasta}")
             for filename in os.listdir(pasta):
                 if filename.endswith('.py'):
-                    # Ajusta o caminho do import baseado na pasta
                     caminho = f"{pasta[2:]}.{filename[:-3]}"
                     await bot.load_extension(caminho)
                     print(f"  - {filename} carregado!")
-        else:
-            print(f"⚠️ Pasta '{pasta}' não encontrada.")
 
-    # 4. REGISTRO DE PERSISTÊNCIA
+    # 4. REGISTRO DE PERSISTÊNCIA (Crucial para botões funcionarem após reiniciar)
     bot.add_view(ExameView())
+    bot.add_view(DenunciaView()) # Registramos o botão de denúncia aqui!
     print("Views persistentes registradas! ✅")
 
 bot.setup_hook = setup_hook

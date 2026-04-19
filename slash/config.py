@@ -76,22 +76,23 @@ class SeletorCanalDenuncia(discord.ui.ChannelSelect):
         )
 
     async def callback(self, interaction: discord.Interaction):
-        # SEGURANÇA: Verifica se quem clicou é administrador (caso a mensagem seja pública)
         if not interaction.permissions.administrator:
             return await interaction.response.send_message("❌ Apenas administradores podem alterar configurações.", ephemeral=True)
 
         canal_selecionado = self.values[0]
-        guild_id = interaction.guild.id
+        guild_id = int(interaction.guild.id)
 
-        # Atualização no Banco de Dados
+        # 1. Salva no Banco (na coluna canal_denuncias)
         await interaction.client.db.execute(
             'UPDATE servers SET canal_denuncias = $1 WHERE id = $2',
-            str(canal_selecionado.id), guild_id
+            canal_selecionado.id, guild_id
         )
 
-        # Mensagem agora é pública (ephemeral=False)
+        # 2. Atualiza o Cache na hora!
+        interaction.client.cache_denuncias[guild_id] = canal_selecionado.id
+
         await interaction.response.send_message(
-            f"📢 **Configuração Atualizada:** O canal de denúncias agora é {canal_selecionado.mention}.", 
+            f"✅ Canal de denúncias definido para: {canal_selecionado.mention}", 
             ephemeral=False
         )
 
