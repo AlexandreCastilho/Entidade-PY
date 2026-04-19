@@ -4,32 +4,38 @@ from discord.ext import commands
 class AutoModeracao(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        
-        # ⚙️ CONFIGURAÇÕES DO EVENTO ⚙️
-        self.CANAL_ARMADILHA_ID = 1495312559274725556 
-        self.CARGO_SILENCIADO_ID = 1495312389971644466
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        
-        # 1. Ignorar mensagens do próprio bot
-        if message.author.bot:
+        if message.author.bot or not message.guild:
             return
 
-        # 2. Verifica se a mensagem foi enviada no canal armadilha
-        if message.channel.id == self.CANAL_ARMADILHA_ID:
-            
-            if isinstance(message.author, discord.Member):
-                
-                # Prepara a lista de IDs dos cargos atuais
-                lista_ids_cargos = [str(role.id) for role in message.author.roles if role.name != "@everyone" and role.name != "Silenciado"]
-                lista_names_cargos = [str(role.name) for role in message.author.roles if role.name != "@everyone" and role.name != "Silenciado"]
+        canal_armadilha_id = self.bot.cache_automod.get(message.guild.id)
+        if canal_armadilha_id is None or message.channel.id != canal_armadilha_id:
+            return
 
-                autor_id = message.author.id
-                
-                # --- A MÁGICA DO UPSERT ---
-                # Tentamos inserir o usuário. Se o ID dele já existir, atualizamos apenas a coluna cargos_uc.
-                # O comando ON CONFLICT (id) exige que 'id' seja a chave primária da tabela.
+        print(f"👀 [PASSO 1] Mensagem detectada no canal armadilha por: {message.author.name}")
+
+        cargo_silenciado_id = self.bot.cache_silenciados.get(message.guild.id)
+        if cargo_silenciado_id is None:
+            print("❌ [ERRO] O canal está configurado, mas o CARGO SILENCIADO não está no cache!")
+            return
+
+        if isinstance(message.author, discord.Member):
+            cargo_silenciado = message.guild.get_role(cargo_silenciado_id)
+            
+            if not cargo_silenciado:
+                print(f"❌ [ERRO] O ID {cargo_silenciado_id} está no cache, mas o Discord não achou esse cargo. Foi apagado?")
+                return
+
+            print("✅ [PASSO 2] Cargo de punição encontrado. Iniciando processo...")
+
+            lista_cargos = [str(role.id) for role in message.author.roles if role.name != "@everyone" and role.id != cargo_silenciado.id]
+            autor_id = message.author.id
+            
+            # BLOCO PROTETOR DO BANCO DE DADOS
+            try:
+                print(f"⏳ [PASSO 3] Tentando salvar {len(lista_cargos)} cargos no Supabase...")
                 await self.bot.db.execute(
                     '''
                     INSERT INTO users (id, cargos_uc) 
@@ -37,23 +43,24 @@ class AutoModeracao(commands.Cog):
                     ON CONFLICT (id) 
                     DO UPDATE SET cargos_uc = EXCLUDED.cargos_uc
                     ''',
-                    autor_id, lista_ids_cargos
+                    autor_id, lista_cargos
                 )
+                print("💾 [PASSO 4] Cargos salvos com sucesso no banco!")
+            except Exception as e:
+                print(f"🚨 [ERRO FATAL NO BANCO DE DADOS]: {e}")
+                print("O processo vai continuar mesmo sem salvar os cargos...")
 
-                cargo_silenciado = message.guild.get_role(self.CARGO_SILENCIADO_ID)
+            # BLOCO PROTETOR DO DISCORD
+            try:
+                print("⏳ [PASSO 5] Tentando remover cargos antigos e aplicar o Silenciado...")
+                await message.author.edit(roles=[cargo_silenciado])
+                await message.channel.send(f"⚠️ {message.author.mention} quebrou a regra e foi silenciado.", delete_after=5)
+                print("🎯 [PASSO 6] SUCESSO! O usuário foi silenciado.")
                 
-                if cargo_silenciado:
-                    try:
-                        # Substitui todos os cargos pelo cargo "Silenciado"
-                        await message.author.edit(roles=[cargo_silenciado])
-                        
-                        await message.channel.send(f"⚠️ {message.author.mention} quebrou a regra e foi silenciado.\nOs cargos que ele possuia eram:{lista_names_cargos}")
-                        print(f"[{message.guild.name}] {message.author.name} silenciado e cargos salvos no banco.")
-                        
-                    except discord.Forbidden:
-                        print("❌ ERRO: O bot não tem permissão para gerenciar cargos (verifique a hierarquia).")
-                    except discord.HTTPException as e:
-                        print(f"❌ ERRO de conexão ao tentar silenciar: {e}")
+            except discord.Forbidden:
+                print("🚫 [ERRO DE HIERARQUIA] O Discord bloqueou a ação! O cargo do Bot PRECISA estar acima do cargo do usuário e do cargo Silenciado nas configurações do servidor.")
+            except discord.HTTPException as e:
+                print(f"❌ [ERRO DE CONEXÃO DISCORD]: {e}")
 
 async def setup(bot):
     await bot.add_cog(AutoModeracao(bot))

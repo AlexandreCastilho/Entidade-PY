@@ -20,6 +20,32 @@ async def setup_hook():
     bot.db = await asyncpg.create_pool(DATABASE_URL, ssl='require', statement_cache_size=0)
     print("Banco de dados conectado! 🗄️")
 
+# --- CRIANDO O CACHE EM MEMÓRIA ---
+    print("Carregando cache de auto moderação...")
+    bot.cache_automod = {} # Dicionário vazio: {id_do_servidor: id_do_canal}
+    
+    # Buscamos apenas os servidores que JÁ TÊM um canal de automod configurado
+    registros = await bot.db.fetch('SELECT id, canal_auto_mod FROM servers WHERE canal_auto_mod IS NOT NULL')
+    
+    for reg in registros:
+        # Salvamos no formato: bot.cache_automod[guild_id] = canal_id
+        bot.cache_automod[reg['id']] = int(reg['canal_auto_mod'])
+        
+    print(f"Cache carregado! {len(bot.cache_automod)} servidores em monitoramento. 🛡️")
+
+    # --- CACHE DE CARGOS SILENCIADOS ---
+# No bot.py, dentro de setup_hook:
+    print("Carregando cache de cargos silenciados...")
+    bot.cache_silenciados = {}
+    
+    registros_cargos = await bot.db.fetch('SELECT id, cargo_silenciado FROM servers WHERE cargo_silenciado IS NOT NULL')
+    
+    for reg in registros_cargos:
+        # Garantimos que o ID do servidor (a chave) seja lido como número inteiro!
+        bot.cache_silenciados[int(reg['id'])] = int(reg['cargo_silenciado'])
+        
+    print(f"Cache de cargos carregado! {len(bot.cache_silenciados)} servidores configurados. 🔇")
+
     # 2. Carregando comandos de ambas as pastas
     pastas = ['./comandos', './slash', './eventos']
     
