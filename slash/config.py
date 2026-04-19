@@ -33,6 +33,41 @@ class SeletorCanalExame(discord.ui.ChannelSelect):
             ephemeral=False
         )
 
+class SeletorCargoSilenciado(discord.ui.RoleSelect):
+    def __init__(self):
+        super().__init__(
+            placeholder="Selecione o cargo de silenciamento...",
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if not interaction.permissions.administrator:
+            return await interaction.response.send_message("❌ Apenas administradores podem alterar configurações.", ephemeral=True)
+
+        cargo_selecionado = self.values[0]
+        guild_id = int(interaction.guild.id)
+
+        print(f"⚙️ [CONFIG] Administrador selecionou o cargo: {cargo_selecionado.name}")
+
+        try:
+            # 1. Atualização no Banco de Dados
+            await interaction.client.db.execute(
+                'UPDATE servers SET cargo_silenciado = $1 WHERE id = $2',
+                cargo_selecionado.id, guild_id
+            )
+            print("💾 [CONFIG] Banco de dados atualizado com sucesso!")
+            
+            # 2. Atualização no Cache em Memória
+            interaction.client.cache_silenciados[guild_id] = int(cargo_selecionado.id)
+            print(f"🧠 [CONFIG] Memória do bot atualizada! Cargo salvo: {interaction.client.cache_silenciados.get(guild_id)}")
+            
+        except Exception as e:
+            print(f"🚨 [ERRO NO CONFIG]: {e}")
+
+        await interaction.response.send_message(
+            f"📢 **Configuração Atualizada:** O cargo de silenciamento agora é {cargo_selecionado.mention}.", 
+            ephemeral=False
+        )
+
 class SeletorCanalDenuncia(discord.ui.ChannelSelect):
     def __init__(self):
         super().__init__(
@@ -41,22 +76,23 @@ class SeletorCanalDenuncia(discord.ui.ChannelSelect):
         )
 
     async def callback(self, interaction: discord.Interaction):
-        # SEGURANÇA: Verifica se quem clicou é administrador (caso a mensagem seja pública)
         if not interaction.permissions.administrator:
             return await interaction.response.send_message("❌ Apenas administradores podem alterar configurações.", ephemeral=True)
 
         canal_selecionado = self.values[0]
-        guild_id = interaction.guild.id
+        guild_id = int(interaction.guild.id)
 
-        # Atualização no Banco de Dados
+        # 1. Salva no Banco (na coluna canal_denuncias)
         await interaction.client.db.execute(
             'UPDATE servers SET canal_denuncias = $1 WHERE id = $2',
-            str(canal_selecionado.id), guild_id
+            canal_selecionado.id, guild_id
         )
 
-        # Mensagem agora é pública (ephemeral=False)
+        # 2. Atualiza o Cache na hora!
+        interaction.client.cache_denuncias[guild_id] = canal_selecionado.id
+
         await interaction.response.send_message(
-            f"📢 **Configuração Atualizada:** O canal de denúncias agora é {canal_selecionado.mention}.", 
+            f"✅ Canal de denúncias definido para: {canal_selecionado.mention}", 
             ephemeral=False
         )
 
@@ -68,20 +104,21 @@ class SeletorCanalAutoMod(discord.ui.ChannelSelect):
         )
 
     async def callback(self, interaction: discord.Interaction):
-        # SEGURANÇA: Verifica se quem clicou é administrador (caso a mensagem seja pública)
         if not interaction.permissions.administrator:
             return await interaction.response.send_message("❌ Apenas administradores podem alterar configurações.", ephemeral=True)
 
         canal_selecionado = self.values[0]
         guild_id = interaction.guild.id
 
-        # Atualização no Banco de Dados
+        # 1. A CORREÇÃO: Estava salvando na coluna errada! Agora salva no 'canal_auto_mod'
         await interaction.client.db.execute(
             'UPDATE servers SET canal_auto_mod = $1 WHERE id = $2',
-            str(canal_selecionado.id), guild_id
+            canal_selecionado.id, guild_id
         )
 
-        # Mensagem agora é pública (ephemeral=False)
+        # 2. A CORREÇÃO: Atualiza o cache de CANAIS (e não de cargos como estava antes)
+        interaction.client.cache_automod[guild_id] = canal_selecionado.id
+
         await interaction.response.send_message(
             f"📢 **Configuração Atualizada:** O canal de auto moderação agora é {canal_selecionado.mention}.", 
             ephemeral=False
@@ -100,6 +137,9 @@ class ConfiguracoesLayout(discord.ui.LayoutView):
         
         discord.ui.TextDisplay(content="## Canal de auto moderação\nEste é o canal onde ninguém deve mandar mensagens para que não seja silenciado:"),
         discord.ui.ActionRow(SeletorCanalAutoMod()),
+        
+        discord.ui.TextDisplay(content="## Cargo de Silenciamento\nEste é o cargo que será atribuído a membros silenciados:"),
+        discord.ui.ActionRow(SeletorCargoSilenciado()),
 
         discord.ui.TextDisplay(content="*Este menu só será funcional por 3 minutos.\nApós isso, use-o novamente.*"),
 
