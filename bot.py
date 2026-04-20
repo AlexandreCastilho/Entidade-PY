@@ -46,7 +46,7 @@ async def setup_hook():
     print(f"✅ Cache Trio Sincronizado: {len(bot.cache_automod)} AutoMod | {len(bot.cache_silenciados)} Cargos | {len(bot.cache_denuncias)} Denúncias")
 
     # 3. CARREGAMENTO DINÂMICO DE PASTAS
-    pastas = ['./comandos', './slash', './eventos']
+    pastas = ['./comandos', './slash', './eventos', './interacoes_mensagem', './interacoes_usuario']
     
     for pasta in pastas:
         if os.path.exists(pasta):

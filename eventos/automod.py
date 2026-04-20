@@ -54,7 +54,7 @@ class AutoModeracao(commands.Cog):
             try:
                 print("⏳ [PASSO 5] Tentando remover cargos antigos e aplicar o Silenciado...")
                 await message.author.edit(roles=[cargo_silenciado])
-                await message.channel.send(f"⚠️ {message.author.mention} quebrou a regra e foi silenciado.", delete_after=5)
+                await message.channel.send(f"⚠️ {message.author.mention} quebrou a regra e foi silenciado.")
                 print("🎯 [PASSO 6] SUCESSO! O usuário foi silenciado.")
                 
             except discord.Forbidden:
