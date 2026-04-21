@@ -23,12 +23,13 @@ async def setup_hook():
 
     # 2. SINCRONIZAÇÃO DO TRIO DE CACHES (AutoMod, Silenciados e Denúncias)
     print("Sincronizando caches integrados...")
-    bot.cache_automod = {}
-    bot.cache_silenciados = {}
-    bot.cache_denuncias = {} # Novo cache centralizado
-    
+    bot.cache_automod = {} # Novo cache para canal onde membros são silenciados se enviarem mensagem
+    bot.cache_silenciados = {} # Novo cache para cargo Silenciado
+    bot.cache_exames = {} # Novo cache para canal de exames
+    bot.cache_denuncias = {} # Novo cache para canal de denuncias
+    bot.cache_registro_punicoes = {} # Novo cache para canal de registro de punições
     # Buscamos todas as colunas de configuração em uma única consulta SQL
-    registros = await bot.db.fetch('SELECT id, canal_auto_mod, cargo_silenciado, canal_denuncias FROM servers')
+    registros = await bot.db.fetch('SELECT id, canal_auto_mod, cargo_silenciado, canal_denuncias, canal_exame, canal_registro_punicoes FROM servers')
     
     for reg in registros:
         guild_id = int(reg['id'])
@@ -42,11 +43,17 @@ async def setup_hook():
 
         if reg['canal_denuncias']:
             bot.cache_denuncias[guild_id] = int(reg['canal_denuncias'])
+
+        if reg['canal_exame']:
+            bot.cache_exames[guild_id] = int(reg['canal_exame'])
+
+        if reg['canal_registro_punicoes']:
+            bot.cache_registro_punicoes[guild_id] = int(reg['canal_registro_punicoes'])
             
-    print(f"✅ Cache Trio Sincronizado: {len(bot.cache_automod)} AutoMod | {len(bot.cache_silenciados)} Cargos | {len(bot.cache_denuncias)} Denúncias")
+    print(f"✅ Cache Trio Sincronizado: {len(bot.cache_automod)} AutoMod | {len(bot.cache_silenciados)} Cargos | {len(bot.cache_denuncias)} Denúncias | {len(bot.cache_exames)} Exames | {len(bot.cache_registro_punicoes)} Registro Punições")
 
     # 3. CARREGAMENTO DINÂMICO DE PASTAS
-    pastas = ['./comandos', './slash', './eventos']
+    pastas = ['./comandos', './slash', './eventos', './interacoes_mensagem', './interacoes_usuario']
     
     for pasta in pastas:
         if os.path.exists(pasta):

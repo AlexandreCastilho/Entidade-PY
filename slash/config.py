@@ -27,7 +27,9 @@ class SeletorCanalExame(discord.ui.ChannelSelect):
             str(canal_selecionado.id), guild_id
         )
 
-        # Mensagem agora é pública (ephemeral=False)
+        # 2. Atualiza o Cache na hora!
+        interaction.client.cache_exames[guild_id] = canal_selecionado.id
+
         await interaction.response.send_message(
             f"📢 **Configuração Atualizada:** O canal de exames agora é {canal_selecionado.mention}.", 
             ephemeral=False
@@ -124,6 +126,35 @@ class SeletorCanalAutoMod(discord.ui.ChannelSelect):
             ephemeral=False
         )
 
+class SeletorCanalRegistroPunicoes(discord.ui.ChannelSelect):
+    def __init__(self):
+        super().__init__(
+            placeholder="Selecione o canal onde são enviados os registros de punições dos membros...",
+            channel_types=[discord.ChannelType.text]
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if not interaction.permissions.administrator:
+            return await interaction.response.send_message("❌ Apenas administradores podem alterar configurações.", ephemeral=True)
+
+        canal_selecionado = self.values[0]
+        guild_id = interaction.guild.id
+
+        # 1. A CORREÇÃO: Estava salvando na coluna errada! Agora salva no 'canal_auto_mod'
+        await interaction.client.db.execute(
+            'UPDATE servers SET canal_registro_punicoes = $1 WHERE id = $2',
+            canal_selecionado.id, guild_id
+        )
+
+        # 2. A CORREÇÃO: Atualiza o cache de CANAIS (e não de cargos como estava antes)
+        interaction.client.cache_registro_punicoes[guild_id] = canal_selecionado.id
+
+        await interaction.response.send_message(
+            f"📢 **Configuração Atualizada:** O canal de registro de punições agora é {canal_selecionado.mention}.", 
+            ephemeral=False
+        )
+
+
 # ==========================================
 # 2. O LAYOUT V2 (Estrutura Visual)
 # ==========================================
@@ -140,6 +171,9 @@ class ConfiguracoesLayout(discord.ui.LayoutView):
         
         discord.ui.TextDisplay(content="## Cargo de Silenciamento\nEste é o cargo que será atribuído a membros silenciados:"),
         discord.ui.ActionRow(SeletorCargoSilenciado()),
+
+        discord.ui.TextDisplay(content="## Canal de registro de punições\nEste é o canal para onde são enviados automaticamente os registros de punições."),
+        discord.ui.ActionRow(SeletorCanalRegistroPunicoes()),
 
         discord.ui.TextDisplay(content="*Este menu só será funcional por 3 minutos.\nApós isso, use-o novamente.*"),
 
