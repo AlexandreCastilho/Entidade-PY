@@ -2,7 +2,46 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import math
-import json
+import datetime
+
+# ==========================================
+# FUNÇÃO AUXILIAR: GERA A EMBED DE SALDO
+# ==========================================
+async def gerar_embed_saldo(bot, alvo: discord.Member, moeda_nome: str, moeda_emoji: str):
+    registro = await bot.db.fetchrow('SELECT carteira, banco, booster_ate FROM users WHERE id = $1', alvo.id)
+    carteira = registro['carteira'] if registro else 0
+    banco = registro['banco'] if registro else 0
+    booster_ate = registro['booster_ate'] if registro else None
+
+    agora = datetime.datetime.now(datetime.timezone.utc)
+    booster_ativo = booster_ate and booster_ate > agora
+
+    # Lógica de exibição de ganhos e booster
+    if booster_ativo:
+        ganho_voz = 4
+        ganho_chat = 2
+        timestamp = int(booster_ate.timestamp())
+        texto_booster = f"🚀 **Booster Ativo!** Seus ganhos estão **dobrados** até <t:{timestamp}:f> (<t:{timestamp}:R>)."
+        cor_embed = discord.Color.brand_green()
+    else:
+        ganho_voz = 2
+        ganho_chat = 1
+        texto_booster = f"🚀 **Booster Inativo.** Seus ganhos estão normais. Use `/loja` para comprar um booster e dobrar seus lucros!"
+        cor_embed = discord.Color.gold()
+
+    descricao = (
+        f"**Rendimentos Atuais:**\n"
+        f"🎙️ Voz: **{ganho_voz}** {moeda_emoji}/min\n"
+        f"💬 Chat: **{ganho_chat}** {moeda_emoji}/msg\n\n"
+        f"{texto_booster}"
+    )
+
+    embed = discord.Embed(title=f"Saldo de {alvo.display_name}", description=descricao, color=cor_embed)
+    embed.set_thumbnail(url=alvo.display_avatar.url)
+    embed.add_field(name="Carteira", value=f"{moeda_emoji} **{carteira:,}** {moeda_nome}".replace(',', '.'), inline=True)
+    embed.add_field(name="Banco", value=f"{moeda_emoji} **{banco:,}** {moeda_nome}".replace(',', '.'), inline=True)
+    
+    return embed
 
 # ==========================================
 # 1. MODAL DE TRANSAÇÃO
@@ -54,14 +93,13 @@ class ModalTransferir(discord.ui.Modal):
             nova_cart, novo_banc = carteira + valor, banco - valor
             texto = f"✅ Sacado **{valor:,}** {self.moeda_nome} para a carteira!".replace(',', '.')
 
+        # Atualiza o banco de dados
         await self.bot.db.execute('UPDATE users SET carteira = $1, banco = $2 WHERE id = $3', nova_cart, novo_banc, interaction.user.id)
 
-        embed = discord.Embed(title=f"Saldo de {interaction.user.display_name}", color=discord.Color.gold())
-        embed.set_thumbnail(url=interaction.user.display_avatar.url)
-        embed.add_field(name="Carteira", value=f"{self.moeda_emoji} **{nova_cart:,}** {self.moeda_nome}".replace(',', '.'), inline=True)
-        embed.add_field(name="Banco", value=f"{self.moeda_emoji} **{novo_banc:,}** {self.moeda_nome}".replace(',', '.'), inline=True)
-
+        # Gera a nova Embed usando a função auxiliar
+        embed = await gerar_embed_saldo(self.bot, interaction.user, self.moeda_nome, self.moeda_emoji)
         view = ViewSaldo(self.bot, interaction.user.id, self.moeda_nome, self.moeda_emoji)
+        
         await interaction.response.send_message(content=texto, embed=embed, view=view)
         view.mensagem_original = await interaction.original_response()
 
@@ -103,43 +141,32 @@ class ViewSaldo(discord.ui.View):
         if interaction.user.id == self.dono_id:
             return await interaction.response.send_message("❌ Você não pode roubar a si mesmo. Tente algo menos autodestrutivo.", ephemeral=True)
 
-        # Busca dados da Vítima (A) e do Ladrão (B)
-        vitima_data = await self.bot.db.fetchrow('SELECT carteira, banco FROM users WHERE id = $1', self.dono_id)
-        ladrao_data = await self.bot.db.fetchrow('SELECT carteira, banco FROM users WHERE id = $1', interaction.user.id)
-
+        vitima_data = await self.bot.db.fetchrow('SELECT carteira FROM users WHERE id = $1', self.dono_id)
         v_carteira = vitima_data['carteira'] if vitima_data else 0
-        l_carteira = ladrao_data['carteira'] if ladrao_data else 0
-        l_banco = ladrao_data['banco'] if ladrao_data else 0
 
         # --- LÓGICA PARA CARTEIRA VAZIA ---
         if v_carteira <= 0:
             texto_falha = f"🎯 **Tentativa de roubo frustrada!** {interaction.user.mention} tentou roubar <@{self.dono_id}>, mas a carteira estava vazia. Que decepção..."
             
-            embed_ladrao = discord.Embed(title=f"Saldo de {interaction.user.display_name}", color=discord.Color.gold())
-            embed_ladrao.set_thumbnail(url=interaction.user.display_avatar.url)
-            embed_ladrao.add_field(name="Carteira", value=f"{self.moeda_emoji} **{l_carteira:,}** {self.moeda_nome}".replace(',', '.'), inline=True)
-            embed_ladrao.add_field(name="Banco", value=f"{self.moeda_emoji} **{l_banco:,}** {self.moeda_nome}".replace(',', '.'), inline=True)
-
+            embed_ladrao = await gerar_embed_saldo(self.bot, interaction.user, self.moeda_nome, self.moeda_emoji)
             view = ViewSaldo(self.bot, interaction.user.id, self.moeda_nome, self.moeda_emoji)
+            
             await interaction.response.send_message(content=texto_falha, embed=embed_ladrao, view=view)
             view.mensagem_original = await interaction.original_response()
             return
         # ---------------------------------------
 
-        # Lógica de sucesso (20% extraído, 16% ganho pelo ladrão)
+        # Lógica de sucesso
         valor_extraido = math.ceil(v_carteira * 0.20)
         perda_no_vacuo = math.ceil(valor_extraido * 0.20)
         ganho_ladrao = valor_extraido - perda_no_vacuo
 
-        await self.bot.db.execute('UPDATE users SET carteira = $1 WHERE id = $2', (v_carteira - valor_extraido), self.dono_id)
-        
-        l_nova_carteira = l_carteira + ganho_ladrao
-        await self.bot.db.execute('UPDATE users SET carteira = $1 WHERE id = $2', l_nova_carteira, interaction.user.id)
-
-        embed_ladrao = discord.Embed(title=f"Saldo de {interaction.user.display_name}", color=discord.Color.gold())
-        embed_ladrao.set_thumbnail(url=interaction.user.display_avatar.url)
-        embed_ladrao.add_field(name="Carteira", value=f"{self.moeda_emoji} **{l_nova_carteira:,}** {self.moeda_nome}".replace(',', '.'), inline=True)
-        embed_ladrao.add_field(name="Banco", value=f"{self.moeda_emoji} **{l_banco:,}** {self.moeda_nome}".replace(',', '.'), inline=True)
+        # Atualiza o banco de dados
+        await self.bot.db.execute('UPDATE users SET carteira = carteira - $1 WHERE id = $2', valor_extraido, self.dono_id)
+        await self.bot.db.execute('''
+            INSERT INTO users (id, carteira) VALUES ($1, $2)
+            ON CONFLICT (id) DO UPDATE SET carteira = users.carteira + EXCLUDED.carteira
+        ''', interaction.user.id, ganho_ladrao)
 
         texto_crime = (
             f"🎯 **Roubo executado com sucesso!**\n"
@@ -148,7 +175,10 @@ class ViewSaldo(discord.ui.View):
             f"💰 Você embolsou **{ganho_ladrao:,}** {self.moeda_nome}."
         ).replace(',', '.')
 
+        # Gera a Embed atualizada do Ladrão
+        embed_ladrao = await gerar_embed_saldo(self.bot, interaction.user, self.moeda_nome, self.moeda_emoji)
         view = ViewSaldo(self.bot, interaction.user.id, self.moeda_nome, self.moeda_emoji)
+        
         await interaction.response.send_message(content=texto_crime, embed=embed_ladrao, view=view)
         view.mensagem_original = await interaction.original_response()
 
@@ -161,13 +191,10 @@ class EconomiaCog(commands.Cog):
         self.bot = bot
         self.moeda_nome = "UCreditos"
         
-        # INTERAÇÃO 1: Clique direito no Usuário
         self.user_ctx_menu = app_commands.ContextMenu(
             name='Ver Saldo',
             callback=self.saldo_contexto_usuario,
         )
-        
-        # INTERAÇÃO 2: Clique direito na Mensagem
         self.msg_ctx_menu = app_commands.ContextMenu(
             name='Ver Saldo do Autor',
             callback=self.saldo_contexto_mensagem,
@@ -183,15 +210,7 @@ class EconomiaCog(commands.Cog):
 
     # --- LÓGICA CENTRAL DE RENDERIZAÇÃO DO SALDO ---
     async def renderizar_saldo(self, interaction: discord.Interaction, alvo: discord.Member):
-        registro = await self.bot.db.fetchrow('SELECT carteira, banco FROM users WHERE id = $1', alvo.id)
-        carteira = registro['carteira'] if registro else 0
-        banco = registro['banco'] if registro else 0
-
-        embed = discord.Embed(title=f"Saldo de {alvo.display_name}", color=discord.Color.gold())
-        embed.set_thumbnail(url=alvo.display_avatar.url)
-        embed.add_field(name="Carteira", value=f"{self.moeda_emoji} **{carteira:,}** {self.moeda_nome}".replace(',', '.'), inline=True)
-        embed.add_field(name="Banco", value=f"{self.moeda_emoji} **{banco:,}** {self.moeda_nome}".replace(',', '.'), inline=True)
-        
+        embed = await gerar_embed_saldo(self.bot, alvo, self.moeda_nome, self.moeda_emoji)
         view = ViewSaldo(self.bot, alvo.id, self.moeda_nome, self.moeda_emoji)
         
         await interaction.followup.send(embed=embed, view=view)
