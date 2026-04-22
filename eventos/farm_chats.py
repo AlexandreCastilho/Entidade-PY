@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands
+import datetime
 
 class FarmChatCog(commands.Cog):
     def __init__(self, bot):
@@ -14,28 +15,35 @@ class FarmChatCog(commands.Cog):
         if message.author.bot or not message.guild:
             return
 
-        # 2. Ignora mensagens que começam com o prefixo do bot (se tiver) ou comandos de slash (que não disparam on_message da mesma forma, mas por segurança)
+        # 2. Ignora comandos
         if message.content.startswith('/'):
             return
 
         # 3. Verifica o Cooldown
-        # O get_bucket pega o "balde" de tempo do usuário. 
-        # O update_rate_limit() retorna None se o usuário NÃO estiver em cooldown, 
-        # e retorna o tempo restante se ele ESTIVER em cooldown.
         bucket = self.cooldown.get_bucket(message)
         retry_after = bucket.update_rate_limit()
 
         if retry_after:
-            # O Tenno enviou mensagem, mas ainda não passou 1 minuto desde a última recompensa.
             return
 
-        # 4. Adiciona o UCrédito na Carteira de forma silenciosa
+        # 4. Lógica de Recompensa e Booster
         try:
-            # Usamos o ON CONFLICT para garantir que, se o usuário for novo, ele seja cadastrado com 1 UCrédito
+            ganho = 1 # O ganho padrão por mensagem
+            
+            # Verifica se o Tenno tem um booster ativo na base de dados
+            reg_user = await self.bot.db.fetchrow('SELECT booster_ate FROM users WHERE id = $1', message.author.id)
+            
+            if reg_user and reg_user['booster_ate']:
+                agora = datetime.datetime.now(datetime.timezone.utc)
+                # Se a data de validade for maior que o momento atual, o booster está ativo!
+                if reg_user['booster_ate'] > agora:
+                    ganho *= 2 # Multiplica o ganho por 2
+
+            # 5. Adiciona o UCrédito na Carteira de forma silenciosa
             await self.bot.db.execute(
                 '''INSERT INTO users (id, carteira) VALUES ($1, $2)
                    ON CONFLICT (id) DO UPDATE SET carteira = users.carteira + EXCLUDED.carteira''',
-                message.author.id, 1
+                message.author.id, ganho
             )
         except Exception as e:
             print(f"❌ Erro ao entregar UCrédito por chat para {message.author.name}: {e}")

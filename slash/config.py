@@ -154,6 +154,36 @@ class SeletorCanalRegistroPunicoes(discord.ui.ChannelSelect):
             ephemeral=False
         )
 
+class SeletorCanaisIgnoradosVoz(discord.ui.ChannelSelect):
+    def __init__(self):
+        super().__init__(
+            placeholder="Canais de voz sem farm...",
+            channel_types=[discord.ChannelType.voice, discord.ChannelType.stage_voice],
+            min_values=0, # 0 permite que o admin desmarque todos os canais para limpar a lista!
+            max_values=25
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if not interaction.permissions.administrator:
+            return await interaction.response.send_message("❌ Apenas administradores podem alterar configurações.", ephemeral=True)
+
+        guild_id = interaction.guild.id
+        # Extrai os IDs dos canais (se não selecionou nenhum, a lista fica vazia [])
+        canais_selecionados = [canal.id for canal in self.values]
+
+        # 1. Salva a Array direto no Banco de Dados
+        await interaction.client.db.execute(
+            'UPDATE servers SET canais_ignorados_voz = $1 WHERE id = $2',
+            canais_selecionados, guild_id
+        )
+
+        # 2. Atualiza o Cache em tempo real
+        interaction.client.cache_canais_ignorados_voz[guild_id] = canais_selecionados
+
+        if canais_selecionados:
+            await interaction.response.send_message(f"✅ Zonas mortas configuradas! O farm foi bloqueado em {len(canais_selecionados)} canal(is) de voz.", ephemeral=False)
+        else:
+            await interaction.response.send_message("✅ Defesas removidas. Todos os canais de voz agora geram UCréditos normalmente.", ephemeral=False)
 
 # ==========================================
 # 2. O LAYOUT V2 (Estrutura Visual)
@@ -174,6 +204,9 @@ class ConfiguracoesLayout(discord.ui.LayoutView):
 
         discord.ui.TextDisplay(content="## Canal de registro de punições\nEste é o canal para onde são enviados automaticamente os registros de punições."),
         discord.ui.ActionRow(SeletorCanalRegistroPunicoes()),
+        
+        discord.ui.TextDisplay(content="## Canais de Voz sem Farm\nSelecione os canais de voz (AFK, Punição) onde os membros NÃO ganharão UCréditos:"),
+        discord.ui.ActionRow(SeletorCanaisIgnoradosVoz()),
 
         discord.ui.TextDisplay(content="*Este menu só será funcional por 3 minutos.\nApós isso, use-o novamente.*"),
 

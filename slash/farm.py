@@ -22,9 +22,9 @@ class FarmCog(commands.Cog):
     async def iniciar_farm(self, interaction: discord.Interaction):
         autor = interaction.user
 
-        # 1. Cálculos Aleatórios
+        # 1. Cálculos Aleatórios Base
         minutos = random.randint(1, 5)
-        ganho = random.randint(1, 5)
+        ganho_base = random.randint(1, 5)
         
         agora = datetime.datetime.now(datetime.timezone.utc)
         data_entrega = agora + datetime.timedelta(minutes=minutos)
@@ -33,28 +33,25 @@ class FarmCog(commands.Cog):
         embed_inicio = discord.Embed(
             title="🛰️ Extração Iniciada",
             description=(
-                f"{autor.mention}, você enviou seus drones para um setor remoto.\n"
-                f"Aguarde a conclusão da coleta de recursos.\n"
+                f"{autor.mention}, enviou os seus drones para um setor remoto.\n"
+                f"Aguarde a conclusão da recolha de recursos.\n"
                 f"A Entidade enviará um relatório assim que a extração terminar."
             ),
             color=discord.Color.blue()
         )
-        embed_inicio.set_footer(text="Status: Extraindo...")
+        embed_inicio.set_footer(text="Status: A extrair...")
         
         await interaction.response.send_message(embed=embed_inicio)
         
-        # --- A CORREÇÃO ESTÁ AQUI ---
-        # Pegamos a mensagem que a Entidade acabou de enviar para usar o ID dela
         mensagem_enviada = await interaction.original_response()
 
-        # 3. Salva na fila de tarefas agendadas
+        # 3. Salva na fila de tarefas agendadas (Guardamos o ganho BASE)
         dados_extras = json.dumps({
-            "ganho": ganho,
+            "ganho": ganho_base,
             "inicio": agora.isoformat(),
             "user_id": autor.id
         })
 
-        # Adicionamos o mensagem_id (mensagem_enviada.id) na requisição
         await self.bot.db.execute(
             '''INSERT INTO tarefas_agendadas (tipo, data_execucao, canal_id, mensagem_id, dados_extras)
                VALUES ($1, $2, $3, $4, $5)''',
@@ -67,7 +64,7 @@ class FarmCog(commands.Cog):
             cog_tarefas.atualizar_vigia()
 
     # ==========================================
-    # 2. O OUVINTE QUE ENTREGA OS CRÉDITOS
+    # 2. O OUVINTE QUE ENTREGA OS CRÉDITOS (Com Lógica de Booster)
     # ==========================================
     @commands.Cog.listener()
     async def on_tarefa_farm(self, tarefa):
@@ -91,27 +88,48 @@ class FarmCog(commands.Cog):
         duracao = agora - inicio
         minutos_totais = round(duracao.total_seconds() / 60)
 
-        # Atualiza a carteira
+        # --- VERIFICAÇÃO DO BOOSTER ---
+        reg_user = await self.bot.db.fetchrow('SELECT booster_ate FROM users WHERE id = $1', user_id)
+        booster_ativo = False
+        
+        if reg_user and reg_user['booster_ate']:
+            # Se a data de validade do booster for maior que o momento atual
+            if reg_user['booster_ate'] > agora:
+                ganho *= 2  # Aplica o multiplicador x2
+                booster_ativo = True
+
+        # --- ATUALIZA A CARTEIRA ---
         await self.bot.db.execute(
             '''INSERT INTO users (id, carteira) VALUES ($1, $2)
                ON CONFLICT (id) DO UPDATE SET carteira = users.carteira + EXCLUDED.carteira''',
             user_id, ganho
         )
 
+        # --- MONTA A MENSAGEM FINAL VISUALMENTE ---
+        descricao = (
+            f"Relatório de missão para {membro.mention}:\n\n"
+            f"**Recursos Recolhidos:** {self.moeda_emoji} **{ganho}** {self.moeda_nome}\n"
+        )
+        
+        # Se o booster estava ativo, adicionamos um aviso espetacular no relatório
+        if booster_ativo:
+            descricao += "🚀 *(Bónus de Booster x2 Aplicado na carga!)*\n"
+            
+        descricao += (
+            f"**Tempo de Operação:** {minutos_totais} minuto(s)\n"
+            f"**Local de Depósito:** Carteira"
+        )
+
         embed_final = discord.Embed(
             title="📦 Extração Concluída",
-            description=(
-                f"Relatório de missão para {membro.mention}:\n\n"
-                f"**Recursos Coletados:** {self.moeda_emoji} **{ganho}** {self.moeda_nome}\n"
-                f"**Tempo de Operação:** {minutos_totais} minuto(s)\n"
-                f"**Local de Depósito:** Carteira"
-            ),
-            color=discord.Color.green()
+            description=descricao,
+            # Se tiver booster, a cor do embed muda para dourado para dar aquele ar premium
+            color=discord.Color.gold() if booster_ativo else discord.Color.green()
         )
         embed_final.set_thumbnail(url=membro.display_avatar.url)
         embed_final.set_footer(text="A economia do Sistema Origem agradece.")
 
-        await canal.send(content=f"{membro.mention}, seus drones retornaram!", embed=embed_final)
+        await canal.send(content=f"{membro.mention}, os seus drones regressaram!", embed=embed_final)
 
 async def setup(bot):
     await bot.add_cog(FarmCog(bot))
