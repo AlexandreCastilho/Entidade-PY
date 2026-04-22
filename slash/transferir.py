@@ -111,13 +111,49 @@ async def processar_transferencia(bot, interaction, alvo, valor_str):
         await interaction.response.send_message(f"❌ Erro na câmara de compensação: {e}", ephemeral=True)
 
 # ==========================================
-# 4. O COMANDO SLASH
+# 4. O COMANDO SLASH E INTERAÇÕES
 # ==========================================
 class TransferirCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.moeda_nome = "UCreditos"
 
+        # INTERAÇÃO 1: Clique direito no Usuário
+        self.user_ctx_menu = app_commands.ContextMenu(
+            name='Transferir UCréditos',
+            callback=self.transferir_contexto_usuario,
+        )
+        
+        # INTERAÇÃO 2: Clique direito na Mensagem
+        self.msg_ctx_menu = app_commands.ContextMenu(
+            name='Transferir p/ Autor',
+            callback=self.transferir_contexto_mensagem,
+        )
+        
+        self.bot.tree.add_command(self.user_ctx_menu)
+        self.bot.tree.add_command(self.msg_ctx_menu)
+
+    # --- CALLBACKS DOS MENUS DE CONTEXTO ---
+    async def transferir_contexto_usuario(self, interaction: discord.Interaction, member: discord.Member):
+        if member.id == interaction.user.id:
+            return await interaction.response.send_message("❌ Você não pode transferir para si mesmo. O vácuo não permite loops infinitos.", ephemeral=True)
+        if member.bot:
+            return await interaction.response.send_message("❌ Máquinas não possuem contas bancárias.", ephemeral=True)
+
+        moeda_emoji = discord.utils.get(self.bot.emojis, name="UCreditos") or "💎"
+        await interaction.response.send_modal(ModalValorTransferir(self.bot, member, self.moeda_nome, moeda_emoji))
+
+    async def transferir_contexto_mensagem(self, interaction: discord.Interaction, message: discord.Message):
+        alvo = message.author
+        if alvo.id == interaction.user.id:
+            return await interaction.response.send_message("❌ Você não pode transferir para si mesmo.", ephemeral=True)
+        if alvo.bot:
+            return await interaction.response.send_message("❌ Máquinas não possuem contas bancárias.", ephemeral=True)
+
+        moeda_emoji = discord.utils.get(self.bot.emojis, name="UCreditos") or "💎"
+        await interaction.response.send_modal(ModalValorTransferir(self.bot, alvo, self.moeda_nome, moeda_emoji))
+
+    # --- COMANDO SLASH NORMAL ---
     @app_commands.command(name="transferir", description="Transfere UCréditos do seu banco para o banco de outro Tenno.")
     @app_commands.describe(usuario="O destinatário", valor="A quantia (número ou 'tudo')")
     async def transferir(self, interaction: discord.Interaction, usuario: discord.Member = None, valor: str = None):
@@ -127,6 +163,8 @@ class TransferirCog(commands.Cog):
         if usuario and valor:
             if usuario.id == interaction.user.id:
                 return await interaction.response.send_message("❌ Você não pode transferir para si mesmo.", ephemeral=True)
+            if usuario.bot:
+                return await interaction.response.send_message("❌ Máquinas não possuem contas bancárias.", ephemeral=True)
             await processar_transferencia(self.bot, interaction, usuario, valor)
 
         # Caso 2: Falta o usuário ou falta o valor
@@ -141,8 +179,14 @@ class TransferirCog(commands.Cog):
                 )
                 await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
             else:
+                if usuario.bot:
+                    return await interaction.response.send_message("❌ Máquinas não possuem contas bancárias.", ephemeral=True)
                 # Se ele já passou o usuário mas não o valor, abre o modal direto
                 await interaction.response.send_modal(ModalValorTransferir(self.bot, usuario, self.moeda_nome, moeda_emoji))
+
+    async def cog_unload(self):
+        self.bot.tree.remove_command(self.user_ctx_menu.name, type=self.user_ctx_menu.type)
+        self.bot.tree.remove_command(self.msg_ctx_menu.name, type=self.msg_ctx_menu.type)
 
 async def setup(bot):
     await bot.add_cog(TransferirCog(bot))

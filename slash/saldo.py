@@ -111,7 +111,7 @@ class ViewSaldo(discord.ui.View):
         l_carteira = ladrao_data['carteira'] if ladrao_data else 0
         l_banco = ladrao_data['banco'] if ladrao_data else 0
 
-        # --- NOVA LÓGICA PARA CARTEIRA VAZIA ---
+        # --- LÓGICA PARA CARTEIRA VAZIA ---
         if v_carteira <= 0:
             texto_falha = f"🎯 **Tentativa de roubo frustrada!** {interaction.user.mention} tentou roubar <@{self.dono_id}>, mas a carteira estava vazia. Que decepção..."
             
@@ -154,23 +154,35 @@ class ViewSaldo(discord.ui.View):
 
 
 # ==========================================
-# 3. O COMANDO PRINCIPAL
+# 3. O COMANDO PRINCIPAL E INTERAÇÕES
 # ==========================================
 class EconomiaCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.moeda_nome = "UCreditos"
+        
+        # INTERAÇÃO 1: Clique direito no Usuário
+        self.user_ctx_menu = app_commands.ContextMenu(
+            name='Ver Saldo',
+            callback=self.saldo_contexto_usuario,
+        )
+        
+        # INTERAÇÃO 2: Clique direito na Mensagem
+        self.msg_ctx_menu = app_commands.ContextMenu(
+            name='Ver Saldo do Autor',
+            callback=self.saldo_contexto_mensagem,
+        )
+        
+        self.bot.tree.add_command(self.user_ctx_menu)
+        self.bot.tree.add_command(self.msg_ctx_menu)
     
     @property
     def moeda_emoji(self):
         emoji = discord.utils.get(self.bot.emojis, name="UCreditos")
         return emoji if emoji else "💎"
 
-    @app_commands.command(name="saldo", description="Verifica a riqueza acumulada de um mortal.")
-    @app_commands.describe(membro="O membro que você deseja espionar (opcional)")
-    async def ver_saldo(self, interaction: discord.Interaction, membro: discord.Member = None):
-        alvo = membro or interaction.user
-
+    # --- LÓGICA CENTRAL DE RENDERIZAÇÃO DO SALDO ---
+    async def renderizar_saldo(self, interaction: discord.Interaction, alvo: discord.Member):
         registro = await self.bot.db.fetchrow('SELECT carteira, banco FROM users WHERE id = $1', alvo.id)
         carteira = registro['carteira'] if registro else 0
         banco = registro['banco'] if registro else 0
@@ -181,8 +193,28 @@ class EconomiaCog(commands.Cog):
         embed.add_field(name="Banco", value=f"{self.moeda_emoji} **{banco:,}** {self.moeda_nome}".replace(',', '.'), inline=True)
         
         view = ViewSaldo(self.bot, alvo.id, self.moeda_nome, self.moeda_emoji)
-        await interaction.response.send_message(embed=embed, view=view)
+        
+        await interaction.followup.send(embed=embed, view=view)
         view.mensagem_original = await interaction.original_response()
+
+    # --- CALLBACKS DAS INTERAÇÕES ---
+    @app_commands.command(name="saldo", description="Verifica a riqueza acumulada de um mortal.")
+    @app_commands.describe(membro="O membro que você deseja espionar (opcional)")
+    async def ver_saldo(self, interaction: discord.Interaction, membro: discord.Member = None):
+        await interaction.response.defer()
+        await self.renderizar_saldo(interaction, membro or interaction.user)
+
+    async def saldo_contexto_usuario(self, interaction: discord.Interaction, member: discord.Member):
+        await interaction.response.defer()
+        await self.renderizar_saldo(interaction, member)
+
+    async def saldo_contexto_mensagem(self, interaction: discord.Interaction, message: discord.Message):
+        await interaction.response.defer()
+        await self.renderizar_saldo(interaction, message.author)
+
+    async def cog_unload(self):
+        self.bot.tree.remove_command(self.user_ctx_menu.name, type=self.user_ctx_menu.type)
+        self.bot.tree.remove_command(self.msg_ctx_menu.name, type=self.msg_ctx_menu.type)
 
 async def setup(bot):
     await bot.add_cog(EconomiaCog(bot))
