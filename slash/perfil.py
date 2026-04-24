@@ -28,16 +28,18 @@ class ModalUpdateWarframe(discord.ui.Modal, title="Atualizar Dados do Warframe")
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
+            # Validamos se o que o usuário digitou é realmente um número
             mr_int = int(self.mr.value.strip())
         except ValueError:
             return await interaction.response.send_message("❌ O Rank de Maestria deve ser um número inteiro.", ephemeral=True)
 
+        # Salvamos no banco convertendo o MR validado para string (str)
         await self.bot.db.execute('''
             INSERT INTO users (id, nick_warframe, mr) 
             VALUES ($1, $2, $3)
             ON CONFLICT (id) 
             DO UPDATE SET nick_warframe = EXCLUDED.nick_warframe, mr = EXCLUDED.mr
-        ''', interaction.user.id, self.nick.value.strip(), mr_int)
+        ''', interaction.user.id, self.nick.value.strip(), str(mr_int))
 
         await interaction.response.send_message(f"✅ Dados atualizados: **{self.nick.value}** (MR {mr_int})", ephemeral=True)
 
@@ -82,11 +84,21 @@ class PerfilCog(commands.Cog):
 
         # HIERARQUIA DE CARGOS (IDs fornecidos)
         self.alliance_roles = [
-            1000948450759807087, 1000948449656705045, 1000948445684711485,
-            1000948444426416139, 1000948440135639180, 1000948439233867816,
-            1000948434460753940, 1000948425396846653, 1000948429276581959,
-            1000948428450308176, 1000948423920472074, 1000948420342714399,
-            1000948383659339808, 1000948385936842862, 1079099118414205098            
+            1000948385936842862, # Fundador
+            1079099118414205098, # Senhor do Cosmo
+            1000948383659339808, # Líder de Clã
+            1000948420342714399, # Lorde
+            1000948423920472074, # Essência Desconhecida
+            1000948428450308176, # Gerente de Eventos
+            1000948429276581959, # Essência Desconhecida
+            1000948425396846653, # Gerente de Moderação
+            1000948434460753940, # Moderador
+            1000948439233867816, # Decorador
+            1000948440135639180, # Recrutador
+            1000948444426416139, # Essência Desconhecida
+            1000948445684711485, # Essência Desconhecida
+            1000948449656705045, # Essência Desconhecida
+            1000948450759807087, # Desenvolvedor
         ]
         
         self.clan_roles_ids = [
@@ -161,7 +173,6 @@ class PerfilCog(commands.Cog):
 
     async def perfil_contexto_mensagem(self, interaction: discord.Interaction, message: discord.Message):
         await interaction.response.defer()
-        # Aqui pegamos o autor da mensagem em que o usuário clicou
         await self.renderizar_perfil(interaction, message.author)
 
     async def cog_unload(self):

@@ -241,8 +241,15 @@ class CanaisDinamicosCog(commands.Cog):
                     canais_grupo.append(novo_canal)
                     
                     # Coloca o canal logo abaixo do último do grupo gerado, mas acima do [99] se existir
-                    posicao_correta = template.position + len(canais_grupo) - 1
-                    await novo_canal.edit(position=posicao_correta)
+                    ancora = discord.utils.find(lambda c: "[99]" in c.name, canais_grupo)
+                    
+                    if ancora:
+                        # Rouba a posição da âncora, empurrando-a para baixo
+                        await novo_canal.edit(position=ancora.position)
+                    else:
+                        # Fallback: Cálculo matemático se não houver âncora
+                        posicao_correta = template.position + len(canais_grupo) - 1
+                        await novo_canal.edit(position=posicao_correta)
                     
                     await asyncio.sleep(1.5) # Respeita Rate Limit do Discord
                 except Exception as e:

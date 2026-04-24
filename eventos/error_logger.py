@@ -8,8 +8,8 @@ import sys
 # CONFIGURAÇÃO DE ALVOS (Hardcoded)
 # ==========================================
 # Substitua estes números pelos IDs reais do seu servidor e do canal de logs
-GUILD_ID = 123456789012345678 
-CHANNEL_ID = 123456789012345678
+GUILD_ID = 272908359823261708 
+CHANNEL_ID = 1000948688396492840
 
 class ErrorLoggerCog(commands.Cog):
     def __init__(self, bot):
@@ -55,7 +55,7 @@ class ErrorLoggerCog(commands.Cog):
         embed.description = f"```py\n{erro_msg_formatada}\n```"
         
         try:
-            await canal.send(embed=embed)
+            await canal.send(content="<@176422291251527682>", embed=embed)
         except discord.HTTPException as e:
             print(f"❌ [ErrorLogger] Falha ao enviar a embed de log: {e}")
 

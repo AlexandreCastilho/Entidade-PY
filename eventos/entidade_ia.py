@@ -77,7 +77,13 @@ class EntidadeIA(commands.Cog):
                        - `created_at` (timestamp)
                        - `nick_warframe` (text) (contem o nick do membro no jogo Warframe)
                        - `cargos_uc` (text array) (contem uma lista de ids de cargos que o membro tinha antes de ser silenciado. Ao ser silenciado, ele perdeu estes cargos e ficou apenas com o cargo de silenciado.)
-                    
+                       - `carteira` (int8) (Contem quandos UCréditos o membro possui em sua carteira. UCreditos são a moeda do servidor da União Cósmica.)
+                       - `banco`(int8) (Contem quantos UCréditos o membro possui no banco. O banco é mais seguro que a carteira, e é o destino de eventuais transferencias.)
+                       - `booster_ate (timestamptz) (Contém a timestamp de até quando o membro terá um booster de UCreditos)
+                       - `mr`(text) (Indica o Nível de Maestria do membro no jogo Warframe)
+                       - `tempo_call` (int8) (Quantidade de tempo, em segundos, que o membro já passou em canais de voz do servidor)
+
+                       
                     Use `await message.channel.send(...)` para responder ou interagir com o usuário.
                     Lembre-se de usar `await` para funções assíncronas do Discord e do Banco de Dados.
                     
