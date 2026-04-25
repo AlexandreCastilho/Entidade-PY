@@ -15,10 +15,9 @@ class ModalDefinirAposta(discord.ui.Modal):
         self.multiplicador = multiplicador
         self.moeda_emoji = moeda_emoji
         
-        # CÁLCULO DA APOSTA MÍNIMA
+        # CÁLCULO DA APOSTA MÍNIMA (Para evitar lucro zero devido à taxa)
         self.aposta_minima = math.ceil(1 / (0.95 * (multiplicador - 1)))
         
-        # O campo agora NÃO é obrigatório (required=False)
         self.valor_input = discord.ui.TextInput(
             label=f"Aposta (Mínimo: {self.aposta_minima})",
             placeholder="Deixe em branco para apostar TUDO da carteira...",
@@ -109,7 +108,7 @@ class ModalDefinirAposta(discord.ui.Modal):
 
 
 # ==========================================
-# 2. VIEW DE APOSTAS (TEMPORÁRIA)
+# 2. VIEW DE APOSTAS (OS BOTÕES SIMPLIFICADOS)
 # ==========================================
 class ApostarView(discord.ui.View):
     def __init__(self, bot, moeda_emoji):
@@ -127,25 +126,48 @@ class ApostarView(discord.ui.View):
             except discord.HTTPException:
                 pass
 
-    @discord.ui.button(label="1% (100x)", style=discord.ButtonStyle.danger)
-    async def btn_1(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ModalDefinirAposta(self.bot, 1, 100, self.moeda_emoji))
-
-    @discord.ui.button(label="5% (20x)", style=discord.ButtonStyle.secondary)
-    async def btn_5(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ModalDefinirAposta(self.bot, 5, 20, self.moeda_emoji))
-
-    @discord.ui.button(label="25% (4x)", style=discord.ButtonStyle.primary)
-    async def btn_25(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ModalDefinirAposta(self.bot, 25, 4, self.moeda_emoji))
-
-    @discord.ui.button(label="50% (2x)", style=discord.ButtonStyle.success)
-    async def btn_50(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ModalDefinirAposta(self.bot, 50, 2, self.moeda_emoji))
-
-    @discord.ui.button(label="90% (1.1x)", style=discord.ButtonStyle.success)
-    async def btn_90(self, interaction: discord.Interaction, button: discord.ui.Button):
+    @discord.ui.button(label="Aposta Fácil", style=discord.ButtonStyle.success)
+    async def btn_facil(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ModalDefinirAposta(self.bot, 90, 1.1, self.moeda_emoji))
+
+    @discord.ui.button(label="Aposta Normal", style=discord.ButtonStyle.primary)
+    async def btn_normal(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ModalDefinirAposta(self.bot, 50, 2.0, self.moeda_emoji))
+
+    @discord.ui.button(label="Aposta Arriscada", style=discord.ButtonStyle.danger)
+    async def btn_arriscada(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ModalDefinirAposta(self.bot, 5, 20.0, self.moeda_emoji))
+
+    @discord.ui.button(label="Detalhes", style=discord.ButtonStyle.secondary, emoji="ℹ️")
+    async def btn_detalhes(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Envia uma mensagem invisível (ephemeral) para quem clicou, explicando as apostas
+        detalhes_embed = discord.Embed(
+            title="📊 Como funcionam as Apostas?",
+            description=(
+                f"O lucro líquido de cada vitória tem uma pequena taxa de 5% retida pela casa.\n"
+                f"Veja os exemplos abaixo imaginando uma aposta de **1.000 {self.moeda_emoji}**:\n\n"
+                
+                f"🟢 **Aposta Fácil (90% de chance)**\n"
+                f"Aposta muito segura, mas o retorno é baixo (1.1x).\n"
+                f"• *Lucro Bruto:* 100 {self.moeda_emoji}\n"
+                f"• *Taxa (5%):* 5 {self.moeda_emoji}\n"
+                f"• *Se ganhar, recebe de volta:* **1.095 {self.moeda_emoji}**\n\n"
+                
+                f"🔵 **Aposta Normal (50% de chance)**\n"
+                f"O clássico 'dobro ou nada' (2x).\n"
+                f"• *Lucro Bruto:* 1.000 {self.moeda_emoji}\n"
+                f"• *Taxa (5%):* 50 {self.moeda_emoji}\n"
+                f"• *Se ganhar, recebe de volta:* **1.950 {self.moeda_emoji}**\n\n"
+                
+                f"🔴 **Aposta Arriscada (5% de chance)**\n"
+                f"Para os corajosos! Risco extremo, mas o pagamento é massivo (20x).\n"
+                f"• *Lucro Bruto:* 20.000 {self.moeda_emoji}\n"
+                f"• *Taxa (5%):* 950 {self.moeda_emoji}\n"
+                f"• *Se ganhar, recebe de volta:* **19.050 {self.moeda_emoji}**"
+            ),
+            color=discord.Color.light_grey()
+        )
+        await interaction.response.send_message(embed=detalhes_embed, ephemeral=True)
 
 
 # ==========================================
@@ -163,16 +185,13 @@ class ApostarCog(commands.Cog):
     @app_commands.command(name="apostar", description="Abre uma mesa rápida de apostas na carteira.")
     async def apostar(self, interaction: discord.Interaction):
         embed = discord.Embed(
-            title="🎲 Apostar!",
+            title="🎲 Mesa de Apostas",
             description=(
-                "💰 As apostas utilizam o saldo da **Carteira**.\n"
-                "🔥 Deixe o valor em branco no modal para dar **ALL-IN**.\n"
-                "⚖️ A casa retém **5% do lucro** em vitórias.\n\n"
-                "O valor de porcentagem indica a tua chance de vitória!\n"
-                "O valor com 'x' indica o multiplicador da tua aposta!\n\n"
-                f"Exemplo: Apostar 100 {self.moeda_emoji} na opção 25% (4x)\n"
-                f"Resultado: Sua chance de vencer é de 25%, e o premio bruto é de 400 {self.moeda_emoji}!\n\n"
-                "**Escolha sua probabilidade:**"
+                "Bem-vindo à mesa da Entidade Cósmica!\n\n"
+                "💰 As apostas utilizam o saldo da sua **Carteira**.\n"
+                "🔥 Deixe o valor em branco para dar **ALL-IN**.\n"
+                "⚖️ A casa retém **5% do lucro** nas vitórias.\n\n"
+                "Escolha a sua modalidade de risco nos botões abaixo:"
             ),
             color=discord.Color.blue()
         )

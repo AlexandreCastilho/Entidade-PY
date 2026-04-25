@@ -18,8 +18,37 @@ class AutoRoleCondicional(commands.Cog):
 
         self.CARGOS_CONFLITANTES = [self.CARGO_TENNO_DE_ORION, self.CARGO_TENNO_DE_AQUILA, self.CARGO_TENNO_DE_ANDROMEDA, self.CARGO_TENNO_DE_LYRA, self.CARGO_QUERO_PARTICIPAR, self.CARGO_VISITANTE]
 
-
         self.CARGO_MEMBRO = 1000948464869453905
+
+        self.CARGO_RECRUTADOR = 1000948440135639180
+        self.CARGO_RECRUATDOR_ORION = 1000948441024839690
+        self.CARGO_RECRUATDOR_AQUILA = 1000948442010505286
+        self.CARGO_RECRUTADOR_ANDROMEDA = 1000948443025518672
+        self.CARGO_RECRUATDOR_LYRA = 1000948443923107872
+
+        self.CARGOS_RECRUTADORES = [self.CARGO_RECRUATDOR_ORION, self.CARGO_RECRUATDOR_AQUILA, self.CARGO_RECRUTADOR_ANDROMEDA, self.CARGO_RECRUATDOR_LYRA]
+
+
+    async def adicionar_ou_remover_cargo_recrutador(self, member: discord.Member):
+        
+        # se o membro for bot, ignorar
+        if member.bot:
+            return
+        
+        # se o membro já tiver o cargo de recrutador, verificar se ele tem o cargo de recrutador de algum clã. Se não tiver, remove o cargo de recrutador.
+        if any(role.id == self.CARGO_RECRUTADOR for role in member.roles):
+            if not any(role.id in self.CARGOS_RECRUTADORES for role in member.roles):
+                try:
+                    await member.remove_roles(discord.Object(id=self.CARGO_RECRUTADOR))
+                except discord.Forbidden:
+                    pass
+        else:
+            # se o membro não tiver o cargo de recrutador, verificar se ele tem o cargo de recrutador de algum clã. Se tiver, adiciona o cargo de recrutador.
+            if any(role.id in self.CARGOS_RECRUTADORES for role in member.roles):
+                try:
+                    await member.add_roles(discord.Object(id=self.CARGO_RECRUTADOR))
+                except discord.Forbidden:
+                    pass
 
     async def adicionar_ou_remover_cargo_membro(self, member: discord.Member):
         
@@ -41,6 +70,7 @@ class AutoRoleCondicional(commands.Cog):
                     await member.add_roles(discord.Object(id=self.CARGO_MEMBRO))
                 except discord.Forbidden:
                     pass
+    
     # Se um membro recebe um dos cargos da lista de cargos que são conflitantes entre si, remove os demais, caso ele os possua.
     async def remover_cargos_conflitantes(self, memberAfter: discord.Member, memberBefore: discord.Member):
         # Identificar os cargos que foram adicionados

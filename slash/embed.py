@@ -175,6 +175,40 @@ class ModalEditar(discord.ui.Modal, title='Editar Mensagem do Bot'):
         except Exception as e:
             await interaction.response.send_message(f"❌ Falha na transmutação: Verifica os IDs ou as minhas permissões.\nErro: {e}", ephemeral=True)
 
+class ModalWebhook(discord.ui.Modal, title='Enviar para Webhook'):
+    url_webhook = discord.ui.TextInput(
+        label='URL do Webhook', 
+        placeholder='https://discord.com/api/webhooks/...', 
+        required=True
+    )
+
+    def __init__(self, view):
+        super().__init__()
+        self.view_pai = view
+
+    async def on_submit(self, interaction: discord.Interaction):
+        url = self.url_webhook.value.strip()
+        
+        # Validação simples
+        if not url.startswith('https://discord.com/api/webhooks/'):
+            return await interaction.response.send_message("❌ URL de Webhook inválida.", ephemeral=True)
+            
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            # Usa o cliente do próprio bot para despachar a mensagem pelo Webhook
+            webhook = discord.Webhook.from_url(url, client=self.view_pai.bot)
+            await webhook.send(embed=self.view_pai.embed)
+            
+            # Desativa os botões para indicar que a operação foi concluída
+            for child in self.view_pai.children:
+                child.disabled = True
+            await interaction.edit_original_response(view=self.view_pai)
+            
+            await interaction.followup.send("✅ Essência projetada com sucesso através do Webhook!", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Erro cósmico na conexão com o Webhook:\nVerifique se a URL ainda é válida.\n`{e}`", ephemeral=True)
+
 
 # ==========================================
 # A INTERFACE PRINCIPAL (View)
@@ -279,6 +313,10 @@ class ConstrutorEmbedView(discord.ui.View):
     @discord.ui.button(label="Editar Existente", style=discord.ButtonStyle.secondary, row=3, emoji="🔧")
     async def btn_editar_existente(self, interaction: discord.Interaction, button: discord.ui.Button):
         await interaction.response.send_modal(ModalEditar(self))
+
+    @discord.ui.button(label="Enviar via Webhook", style=discord.ButtonStyle.blurple, row=3, emoji="🪝")
+    async def btn_enviar_webhook(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ModalWebhook(self))
 
 
 # ==========================================
