@@ -22,33 +22,61 @@ class AutoRoleCondicional(commands.Cog):
 
         self.CARGO_RECRUTADOR = 1000948440135639180
         self.CARGO_RECRUATDOR_ORION = 1000948441024839690
-        self.CARGO_RECRUATDOR_AQUILA = 1000948442010505286
+        self.CARGO_RECRUTADOR_AQUILA = 1000948442010505286
         self.CARGO_RECRUTADOR_ANDROMEDA = 1000948443025518672
-        self.CARGO_RECRUATDOR_LYRA = 1000948443923107872
+        self.CARGO_RECRUTADOR_LYRA = 1000948443923107872
 
-        self.CARGOS_RECRUTADORES = [self.CARGO_RECRUATDOR_ORION, self.CARGO_RECRUATDOR_AQUILA, self.CARGO_RECRUTADOR_ANDROMEDA, self.CARGO_RECRUATDOR_LYRA]
+        self.CARGOS_RECRUTADORES = [self.CARGO_RECRUATDOR_ORION, self.CARGO_RECRUTADOR_AQUILA, self.CARGO_RECRUTADOR_ANDROMEDA, self.CARGO_RECRUTADOR_LYRA]
 
 
-    async def adicionar_ou_remover_cargo_recrutador(self, member: discord.Member):
+    async def adicionar_ou_remover_cargo_recrutador_cla(self, member: discord.Member):
         
         # se o membro for bot, ignorar
         if member.bot:
             return
         
-        # se o membro já tiver o cargo de recrutador, verificar se ele tem o cargo de recrutador de algum clã. Se não tiver, remove o cargo de recrutador.
+        # se o membro já tiver o cargo de recrutador, adiciona o cargo de recrutador do clã.
         if any(role.id == self.CARGO_RECRUTADOR for role in member.roles):
             if not any(role.id in self.CARGOS_RECRUTADORES for role in member.roles):
-                try:
-                    await member.remove_roles(discord.Object(id=self.CARGO_RECRUTADOR))
-                except discord.Forbidden:
-                    pass
+                # Adicionar o cargo de recrutador do clã
+                
+                # Verifica se é do clã Orion (cargo tenno de orion). Se sim, atribui recrutador orion, caso ele ainda não tenha esse cargo.
+                if any(role.id == self.CARGO_TENNO_DE_ORION for role in member.roles):
+                    if any(role.id == self.CARGO_TENNO_DE_ORION for role in member.roles):
+                        try:
+                            await member.add_roles(discord.Object(id=self.CARGO_RECRUATDOR_ORION))
+                        except discord.Forbidden:
+                            pass
+                # Verifica se é do clã Aquila (cargo tenno de aquila). Se sim, atribui recrutador aquila, caso ele ainda não tenha esse cargo.
+                if any(role.id == self.CARGO_TENNO_DE_AQUILA for role in member.roles):
+                    if not any(role.id == self.CARGO_RECRUTADOR_AQUILA for role in member.roles):
+                        try:
+                            await member.add_roles(discord.Object(id=self.CARGO_RECRUTADOR_AQUILA))
+                        except discord.Forbidden:
+                            pass
+                # Verifica se é do clã Andromeda (cargo tenno de andromeda). Se sim, atribui recrutador andromeda, caso ele ainda não tenha esse cargo.
+                if any(role.id == self.CARGO_TENNO_DE_ANDROMEDA for role in member.roles):
+                    if any(role.id == self.CARGO_TENNO_DE_ANDROMEDA for role in member.roles):
+                        try:
+                            await member.add_roles(discord.Object(id=self.CARGO_RECRUTADOR_ANDROMEDA))
+                        except discord.Forbidden:
+                            pass
+                # Verifica se é do clã Lyra (cargo tenno de lyra). Se sim, atribui recrutador lyra, caso ele ainda não tenha esse cargo.
+                if any(role.id == self.CARGO_TENNO_DE_LYRA for role in member.roles):
+                    if any(role.id == self.CARGO_TENNO_DE_LYRA for role in member.roles):
+                        try:
+                            await member.add_roles(discord.Object(id=self.CARGO_RECRUTADOR_LYRA))
+                        except discord.Forbidden:
+                            pass
+        
+        #Se o membro não tiver o cargo de recrutador, remove cargos de recrutador de clã que ele tenha.
         else:
-            # se o membro não tiver o cargo de recrutador, verificar se ele tem o cargo de recrutador de algum clã. Se tiver, adiciona o cargo de recrutador.
-            if any(role.id in self.CARGOS_RECRUTADORES for role in member.roles):
-                try:
-                    await member.add_roles(discord.Object(id=self.CARGO_RECRUTADOR))
-                except discord.Forbidden:
-                    pass
+            for role_id in self.CARGOS_RECRUTADORES:
+                if any(role.id == role_id for role in member.roles):
+                    try:
+                        await member.remove_roles(discord.Object(id=role_id))
+                    except discord.Forbidden:
+                        pass
 
     async def adicionar_ou_remover_cargo_membro(self, member: discord.Member):
         
@@ -96,6 +124,8 @@ class AutoRoleCondicional(commands.Cog):
             await self.remover_cargos_conflitantes(after, before)
 
             await self.adicionar_ou_remover_cargo_membro(after)
+            
+            await self.adicionar_ou_remover_cargo_recrutador_cla(after)
 
 async def setup(bot):
     await bot.add_cog(AutoRoleCondicional(bot))
