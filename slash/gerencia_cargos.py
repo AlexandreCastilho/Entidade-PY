@@ -13,7 +13,7 @@ def criar_embed(usuario: discord.Member, mensagem: str, sucesso: bool = False):
     return embed
 
 # ==========================================
-# 1. COMANDO: /configurar_equipes
+# 1. VIEW: /configurar_equipes (Painel ADM)
 # ==========================================
 
 class ViewConfigurarEquipes(discord.ui.LayoutView):
@@ -21,7 +21,7 @@ class ViewConfigurarEquipes(discord.ui.LayoutView):
         super().__init__(timeout=300)
         self.bot = bot
         self.autor = autor
-        self.regras = regras # Formato: {"ID_GERENTE": [ID_ALVO_1, ID_ALVO_2]}
+        self.regras = regras 
         self.gerente_selecionado = None
         self.alvos_selecionados = []
         self.atualizar_view()
@@ -30,7 +30,6 @@ class ViewConfigurarEquipes(discord.ui.LayoutView):
         self.clear_items()
         container = discord.ui.Container(accent_color=discord.Color.blue())
         
-        # 1. Tabela Visual das Regras Atuais
         if not self.regras:
             txt_regras = "Nenhuma equipe configurada no momento."
         else:
@@ -42,20 +41,16 @@ class ViewConfigurarEquipes(discord.ui.LayoutView):
         container.add_item(discord.ui.TextDisplay(content=f"## 📋 Regras de Delegação Atuais\n{txt_regras}"))
         container.add_item(discord.ui.Separator())
         
-        # 2. Painel de Controle
         status = "Selecione o Gerente e os Cargos Alvo abaixo."
         if self.gerente_selecionado:
             status = f"**Gerente:** {self.gerente_selecionado.mention}\n**Alvos:** " + (", ".join([r.mention for r in self.alvos_selecionados]) if self.alvos_selecionados else "Nenhum")
         
         container.add_item(discord.ui.TextDisplay(content=f"## ⚙️ Modificar Regras\n{status}"))
         
-        # Seletores
         container.add_item(discord.ui.ActionRow(self.SeletorGerente(self)))
         container.add_item(discord.ui.ActionRow(self.SeletorAlvos(self)))
         
-        # Linha de Botões com todas as ações
         row_botoes = discord.ui.ActionRow()
-        
         btn_add = discord.ui.Button(label="Adicionar Alvos", style=discord.ButtonStyle.success, emoji="➕")
         btn_add.callback = self.cb_adicionar
         row_botoes.add_item(btn_add)
@@ -71,7 +66,6 @@ class ViewConfigurarEquipes(discord.ui.LayoutView):
         container.add_item(row_botoes)
         self.add_item(container)
 
-    # --- Classes Auxiliares para os Menus de Seleção ---
     class SeletorGerente(discord.ui.RoleSelect):
         def __init__(self, pai):
             super().__init__(placeholder="Selecione o cargo Gerente...", min_values=1, max_values=1)
@@ -90,7 +84,6 @@ class ViewConfigurarEquipes(discord.ui.LayoutView):
             self.pai.atualizar_view()
             await interaction.response.edit_message(view=self.pai)
 
-    # --- Lógica de Banco de Dados ---
     async def salvar_banco(self, interaction: discord.Interaction, mensagem: str):
         await self.bot.db.execute('UPDATE servers SET regras_cargos = $1::jsonb WHERE id = $2', json.dumps(self.regras), interaction.guild.id)
         self.atualizar_view()
@@ -99,63 +92,46 @@ class ViewConfigurarEquipes(discord.ui.LayoutView):
 
     async def cb_adicionar(self, interaction: discord.Interaction):
         if not self.gerente_selecionado or not self.alvos_selecionados:
-            return await interaction.response.send_message(embed=criar_embed(interaction.user, "❌ Selecione um gerente e ao menos um cargo alvo para adicionar."))
+            return await interaction.response.send_message(embed=criar_embed(interaction.user, "❌ Selecione um gerente e ao menos um cargo alvo."))
         
-        # Trava de segurança
         for alvo in self.alvos_selecionados:
             if alvo.position >= interaction.guild.me.top_role.position:
-                return await interaction.response.send_message(embed=criar_embed(interaction.user, f"❌ Não posso gerenciar {alvo.mention}. O meu cargo precisa estar posicionado acima dele no servidor."))
+                return await interaction.response.send_message(embed=criar_embed(interaction.user, f"❌ Não posso gerenciar {alvo.mention}."))
 
         g_id = str(self.gerente_selecionado.id)
-        if g_id not in self.regras:
-            self.regras[g_id] = []
-            
+        if g_id not in self.regras: self.regras[g_id] = []
         for alvo in self.alvos_selecionados:
-            if alvo.id not in self.regras[g_id]:
-                self.regras[g_id].append(alvo.id)
-                
-        await self.salvar_banco(interaction, f"✅ O cargo {self.gerente_selecionado.mention} recebeu as novas permissões de gerência!")
+            if alvo.id not in self.regras[g_id]: self.regras[g_id].append(alvo.id)
+        await self.salvar_banco(interaction, f"✅ O cargo {self.gerente_selecionado.mention} recebeu as permissões.")
 
     async def cb_remover_alvos(self, interaction: discord.Interaction):
         if not self.gerente_selecionado or not self.alvos_selecionados:
-            return await interaction.response.send_message(embed=criar_embed(interaction.user, "❌ Selecione o gerente e os cargos alvo que deseja remover dele."))
-            
+            return await interaction.response.send_message(embed=criar_embed(interaction.user, "❌ Selecione o gerente e os alvos."))
         g_id = str(self.gerente_selecionado.id)
-        if g_id not in self.regras:
-            return await interaction.response.send_message(embed=criar_embed(interaction.user, "❌ Este gerente não possui regras cadastradas."))
-
-        for alvo in self.alvos_selecionados:
-            if alvo.id in self.regras[g_id]:
-                self.regras[g_id].remove(alvo.id)
-                
-        if not self.regras[g_id]:
-            del self.regras[g_id] # Se o gerente não tem mais alvos, apagamos a regra dele
-            
-        await self.salvar_banco(interaction, f"✅ Permissões revogadas! {self.gerente_selecionado.mention} não gerencia mais os cargos selecionados.")
+        if g_id in self.regras:
+            for alvo in self.alvos_selecionados:
+                if alvo.id in self.regras[g_id]: self.regras[g_id].remove(alvo.id)
+            if not self.regras[g_id]: del self.regras[g_id]
+            await self.salvar_banco(interaction, f"✅ Permissões revogadas de {self.gerente_selecionado.mention}.")
 
     async def cb_excluir_gerente(self, interaction: discord.Interaction):
-        if not self.gerente_selecionado:
-            return await interaction.response.send_message(embed=criar_embed(interaction.user, "❌ Selecione o gerente que deseja apagar do sistema."))
-            
+        if not self.gerente_selecionado: return await interaction.response.send_message(embed=criar_embed(interaction.user, "❌ Selecione o gerente."))
         g_id = str(self.gerente_selecionado.id)
         if g_id in self.regras:
             del self.regras[g_id]
-            await self.salvar_banco(interaction, f"✅ Regras de {self.gerente_selecionado.mention} excluídas completamente do sistema!")
-        else:
-            await interaction.response.send_message(embed=criar_embed(interaction.user, "❌ Este cargo não é um gerente atualmente."))
-
+            await self.salvar_banco(interaction, f"✅ Regras de {self.gerente_selecionado.mention} excluídas.")
 
 # ==========================================
-# 2. COMANDO: /minha_equipe
+# 2. VIEW: /minha_equipe (Uso da Staff)
 # ==========================================
 
 class ViewMinhaEquipe(discord.ui.LayoutView):
-    def __init__(self, bot, autor, regras_permitidas):
+    def __init__(self, bot, autor, regras_permitidas, membro_alvo=None):
         super().__init__(timeout=300)
         self.bot = bot
         self.autor = autor
         self.regras = regras_permitidas
-        self.membro_alvo = None
+        self.membro_alvo = membro_alvo
         self.cargo_alvo = None
         self.atualizar_view()
 
@@ -163,11 +139,10 @@ class ViewMinhaEquipe(discord.ui.LayoutView):
         self.clear_items()
         container = discord.ui.Container(accent_color=discord.Color.purple())
         
-        # Construção da "Tabela" visual
+        # Tabela Visual
         tabela = "### 👥 Membros da Equipe sob sua Gestão\n`Membro           | Cargos Pertinentes`\n"
         todos_alvos = set()
-        for alvos in self.regras.values():
-            todos_alvos.update(alvos)
+        for alvos in self.regras.values(): todos_alvos.update(alvos)
         
         for m in self.autor.guild.members:
             cargos_membro = [r.name for r in m.roles if r.id in todos_alvos]
@@ -177,35 +152,34 @@ class ViewMinhaEquipe(discord.ui.LayoutView):
         container.add_item(discord.ui.TextDisplay(content=tabela))
         container.add_item(discord.ui.Separator())
         
-        status = f"Alvo: {self.membro_alvo.mention if self.membro_alvo else 'Nenhum'} | Cargo: {self.cargo_alvo.mention if self.cargo_alvo else 'Nenhum'}"
+        m_mention = self.membro_alvo.mention if self.membro_alvo else 'Nenhum'
+        c_mention = self.cargo_alvo.mention if self.cargo_alvo else 'Nenhum'
+        status = f"**Alvo:** {m_mention} | **Cargo:** {c_mention}"
         container.add_item(discord.ui.TextDisplay(content=status))
 
         # 1. Seletor de Membros
         container.add_item(discord.ui.ActionRow(self.SeletorMembro(self)))
         
-        # 2. Seletor de Cargos Dinâmico (Aqui foi corrigido o erro do 'self.pai')
-        seletor_cargo = discord.ui.Select(placeholder="Escolha o cargo para agir...")
+        # 2. Seletor de Cargos Dinâmico
+        seletor_cargo = discord.ui.Select(placeholder="Escolha o cargo para gerenciar...")
         for r_id in todos_alvos:
             role = self.autor.guild.get_role(r_id)
             if role: seletor_cargo.add_option(label=role.name, value=str(role.id))
         
-        # Nova função dentro da View (sem criar classe extra)
         async def cargo_callback(interaction: discord.Interaction):
             self.cargo_alvo = interaction.guild.get_role(int(interaction.data['values'][0]))
             self.atualizar_view()
-            await interaction.response.edit_message(view=self) # Usa 'self' diretamente
+            await interaction.response.edit_message(view=self)
 
         seletor_cargo.callback = cargo_callback
         container.add_item(discord.ui.ActionRow(seletor_cargo))
 
-        # 3. Botões de Ação
+        # 3. Botões
         row_botoes = discord.ui.ActionRow()
-        btn_add = discord.ui.Button(label="Adicionar Cargo", style=discord.ButtonStyle.success)
+        btn_add = discord.ui.Button(label="Adicionar", style=discord.ButtonStyle.success)
         btn_add.callback = lambda i: self.executar_acao(i, "add")
-        
-        btn_rem = discord.ui.Button(label="Remover Cargo", style=discord.ButtonStyle.danger)
+        btn_rem = discord.ui.Button(label="Remover", style=discord.ButtonStyle.danger)
         btn_rem.callback = lambda i: self.executar_acao(i, "rem")
-        
         row_botoes.add_item(btn_add)
         row_botoes.add_item(btn_rem)
         container.add_item(row_botoes)
@@ -214,7 +188,7 @@ class ViewMinhaEquipe(discord.ui.LayoutView):
 
     class SeletorMembro(discord.ui.UserSelect):
         def __init__(self, pai):
-            super().__init__(placeholder="Selecione o membro da equipe...", min_values=1, max_values=1)
+            super().__init__(placeholder="Selecione outro membro (opcional)...", min_values=1, max_values=1)
             self.pai = pai
         async def callback(self, interaction: discord.Interaction):
             self.pai.membro_alvo = self.values[0]
@@ -223,30 +197,21 @@ class ViewMinhaEquipe(discord.ui.LayoutView):
 
     async def executar_acao(self, interaction: discord.Interaction, tipo):
         if not self.membro_alvo or not self.cargo_alvo:
-            return await interaction.response.send_message(embed=criar_embed(interaction.user, "❌ Selecione um membro e o cargo alvo nas caixas acima."))
+            return await interaction.response.send_message(embed=criar_embed(interaction.user, "❌ Selecione um alvo e um cargo."))
         
-        if self.cargo_alvo.position >= interaction.guild.me.top_role.position:
-            return await interaction.response.send_message(embed=criar_embed(interaction.user, f"❌ Não posso gerenciar o cargo {self.cargo_alvo.mention} pois ele está acima de mim."))
-
         try:
             if tipo == "add":
-                if self.cargo_alvo in self.membro_alvo.roles:
-                    return await interaction.response.send_message(embed=criar_embed(interaction.user, f"❌ O membro {self.membro_alvo.mention} já tem este cargo."))
                 await self.membro_alvo.add_roles(self.cargo_alvo)
                 msg = f"✅ Cargo {self.cargo_alvo.mention} adicionado a {self.membro_alvo.mention}."
             else:
-                if self.cargo_alvo not in self.membro_alvo.roles:
-                    return await interaction.response.send_message(embed=criar_embed(interaction.user, f"❌ O membro {self.membro_alvo.mention} não possui este cargo para ser removido."))
                 await self.membro_alvo.remove_roles(self.cargo_alvo)
                 msg = f"✅ Cargo {self.cargo_alvo.mention} removido de {self.membro_alvo.mention}."
             
             self.atualizar_view()
-            # Envia a embed de sucesso publicamente e edita a view do construtor
             await interaction.response.edit_message(view=self)
             await interaction.followup.send(embed=criar_embed(interaction.user, msg, True))
-        except discord.HTTPException as e:
-            await interaction.response.send_message(embed=criar_embed(interaction.user, f"❌ Erro na API do Discord: {e}"))
-
+        except:
+            await interaction.response.send_message(embed=criar_embed(interaction.user, "❌ Erro: Verifique as minhas permissões de cargo."))
 
 # ==========================================
 # 3. COG PRINCIPAL
@@ -256,35 +221,33 @@ class GerenciaEquipes(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="configurar_equipes", description="[ADMIN] Define a hierarquia de cargos do servidor.")
-    @app_commands.default_permissions(administrator=True)
-    async def config_equipes(self, interaction: discord.Interaction):
-        # Carrega as regras antes de abrir a interface
+    # Lógica compartilhada para buscar regras
+    async def obter_regras_permitidas(self, interaction: discord.Interaction):
         reg = await self.bot.db.fetchrow('SELECT regras_cargos FROM servers WHERE id = $1', interaction.guild.id)
-        regras = json.loads(reg['regras_cargos']) if reg and reg['regras_cargos'] else {}
+        if not reg or not reg['regras_cargos']: return None
         
-        await interaction.response.send_message(view=ViewConfigurarEquipes(self.bot, interaction.user, regras))
+        regras = json.loads(reg['regras_cargos'])
+        
+        # REMOVIDO: O atalho para administradores.
+        # Agora o sistema sempre filtra pelos cargos que o utilizador possui.
+        cargos_autor = [str(r.id) for r in interaction.user.roles]
+        return {k: v for k, v in regras.items() if k in cargos_autor}
 
+    # COMANDO SLASH PADRÃO
     @app_commands.command(name="minha_equipe", description="Gerencia os cargos dos membros da sua equipe.")
     async def minha_equipe(self, interaction: discord.Interaction):
+        regras = await self.obter_regras_permitidas(interaction)
+        if not regras:
+            return await interaction.response.send_message(embed=criar_embed(interaction.user, "❌ Você não possui nenhum cargo de gerência configurado na hierarquia do servidor."))
+        
+        await interaction.response.send_message(view=ViewMinhaEquipe(self.bot, interaction.user, regras))
+
+    @app_commands.command(name="configurar_equipes", description="[ADMIN] Define a hierarquia de cargos.")
+    @app_commands.default_permissions(administrator=True)
+    async def config_equipes(self, interaction: discord.Interaction):
         reg = await self.bot.db.fetchrow('SELECT regras_cargos FROM servers WHERE id = $1', interaction.guild.id)
-        if not reg or not reg['regras_cargos']:
-            return await interaction.response.send_message(embed=criar_embed(interaction.user, "❌ Nenhuma regra de equipe foi configurada neste servidor pelos Administradores."))
-
-        regras = json.loads(reg['regras_cargos'])
-        cargos_autor = [str(r.id) for r in interaction.user.roles]
-        
-        # Filtra apenas o que o autor PODE gerenciar
-        regras_permitidas = {k: v for k, v in regras.items() if k in cargos_autor}
-        
-        if not regras_permitidas and not interaction.user.guild_permissions.administrator:
-            return await interaction.response.send_message(embed=criar_embed(interaction.user, "❌ Você não possui nenhum cargo de gerência na configuração de hierarquia do servidor."))
-
-        # Se for admin, o Discord dá o passe-livre: ele vê e gerencia TUDO
-        if interaction.user.guild_permissions.administrator:
-            regras_permitidas = regras
-
-        await interaction.response.send_message(view=ViewMinhaEquipe(self.bot, interaction.user, regras_permitidas))
+        regras = json.loads(reg['regras_cargos']) if reg and reg['regras_cargos'] else {}
+        await interaction.response.send_message(view=ViewConfigurarEquipes(self.bot, interaction.user, regras))
 
 async def setup(bot):
     await bot.add_cog(GerenciaEquipes(bot))

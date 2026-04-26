@@ -64,7 +64,7 @@ async def processar_transacao_direta(bot, interaction: discord.Interaction, acao
         try:
             valor = int(valor_str)
         except ValueError:
-            return await interaction.response.send_message(embed=criar_embed_erro(interaction.user, "❌ Valor inválido. Use números inteiros."))
+            return await interaction.response.send_message(embed=criar_embed_erro(interaction.user, "❌ Valor inválido. Use números inteiros ou escreva 'tudo'."))
 
     if valor <= 0:
         return await interaction.response.send_message(embed=criar_embed_erro(interaction.user, "❌ O valor deve ser maior que zero."))
@@ -267,9 +267,8 @@ class EconomiaCog(commands.Cog):
         await self.renderizar_saldo(interaction, membro or interaction.user)
 
     @app_commands.command(name="depositar", description="Guarde seus UCréditos em segurança no banco.")
-    @app_commands.describe(valor="A quantia (número ou 'tudo'). Deixe vazio para abrir o menu.")
+    @app_commands.describe(valor="A quantia (número). Deixe vazio para depositar TUDO.")
     async def cmd_depositar(self, interaction: discord.Interaction, valor: str = None):
-        # Verifica a polícia (cooldown) antes de abrir modal ou processar direto
         if hasattr(self.bot, 'cooldown_deposito') and interaction.user.id in self.bot.cooldown_deposito:
             vencimento = self.bot.cooldown_deposito[interaction.user.id]
             agora = datetime.datetime.now(datetime.timezone.utc)
@@ -278,18 +277,15 @@ class EconomiaCog(commands.Cog):
                 msg_policia = f"🚨 **A polícia está na sua cola!**\nAguarde **{tempo_restante} segundos** antes de poder depositar seu dinheiro sujo no banco."
                 return await interaction.response.send_message(embed=criar_embed_erro(interaction.user, msg_policia))
 
-        if valor:
-            await processar_transacao_direta(self.bot, interaction, 'depositar', valor, self.moeda_nome, self.moeda_emoji)
-        else:
-            await interaction.response.send_modal(ModalTransferir(self.bot, 'depositar', self.moeda_nome, self.moeda_emoji))
+        # Aceita a omissão e preenche como "tudo"
+        valor_final = valor if valor else 'tudo'
+        await processar_transacao_direta(self.bot, interaction, 'depositar', valor_final, self.moeda_nome, self.moeda_emoji)
 
     @app_commands.command(name="sacar", description="Retire seus UCréditos do banco para a carteira.")
-    @app_commands.describe(valor="A quantia (número ou 'tudo'). Deixe vazio para abrir o menu.")
-    async def cmd_sacar(self, interaction: discord.Interaction, valor: str = None):
-        if valor:
-            await processar_transacao_direta(self.bot, interaction, 'sacar', valor, self.moeda_nome, self.moeda_emoji)
-        else:
-            await interaction.response.send_modal(ModalTransferir(self.bot, 'sacar', self.moeda_nome, self.moeda_emoji))
+    @app_commands.describe(valor="A quantia (número) ou escreva 'tudo'.")
+    async def cmd_sacar(self, interaction: discord.Interaction, valor: str):
+        # Obriga o preenchimento de 'valor' para evitar acidentes.
+        await processar_transacao_direta(self.bot, interaction, 'sacar', valor, self.moeda_nome, self.moeda_emoji)
 
     @app_commands.command(name="roubar", description="Tente a sorte roubando a carteira de outro Tenno.")
     @app_commands.describe(alvo="A vítima do seu crime")

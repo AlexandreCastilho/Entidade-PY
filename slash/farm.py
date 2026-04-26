@@ -182,7 +182,7 @@ class FarmCog(commands.Cog):
 
         try:
             dados = json.loads(tarefa['dados_extras'])
-            ganho = dados['ganho']
+            ganho_maximo = dados['ganho']
             user_id = dados['user_id']
             drone_num = dados.get('drone_num', 1)
         except:
@@ -193,17 +193,7 @@ class FarmCog(commands.Cog):
 
         agora = datetime.datetime.now(datetime.timezone.utc)
 
-        # Checa booster para aplicar x2 no momento da entrega
-        reg_user = await self.bot.db.fetchrow('SELECT booster_ate FROM users WHERE id = $1', user_id)
-        booster_ativo = reg_user and reg_user['booster_ate'] and reg_user['booster_ate'] > agora
-        
-        ganho_maximo = ganho * 2 if booster_ativo else ganho
-
         descricao = f"Relatório de missão para {membro.mention}:\n\n"
-        
-        if booster_ativo:
-            descricao += "🚀 *(Bónus de Booster x2 Aplicado!)*\n"
-            
         descricao += (
             f"**Carga Puxada:** {self.moeda_emoji} **{ganho_maximo}** {self.moeda_nome}\n"
             f"**Tempo da Operação:** 60 minuto(s)\n\n"
@@ -215,7 +205,7 @@ class FarmCog(commands.Cog):
         embed_final = discord.Embed(
             title=f"📦 Drone {drone_num} Aguardando Descarregamento",
             description=descricao,
-            color=discord.Color.gold() if booster_ativo else discord.Color.blue()
+            color=discord.Color.blue()
         )
         embed_final.set_thumbnail(url=membro.display_avatar.url)
 
