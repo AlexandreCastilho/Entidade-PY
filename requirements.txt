@@ -2,4 +2,3 @@ discord.py
 asyncpg
 python-dotenv
 google-generativeai
-Quart==0.19.4
