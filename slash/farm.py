@@ -4,15 +4,28 @@ from discord import app_commands
 import datetime
 import json
 import math
+import random
 
 # ==========================================
-# FUNÇÃO AUXILIAR DE ERRO
+# FUNÇÃO AUXILIAR DE ERRO E LISTAS
 # ==========================================
 def criar_embed_erro(usuario: discord.Member, mensagem: str):
     """Cria uma embed padronizada vermelha para erros e falhas."""
     embed = discord.Embed(description=mensagem, color=discord.Color.red())
     embed.set_author(name=usuario.display_name, icon_url=usuario.display_avatar.url)
     return embed
+
+# Frases temáticas de Warframe para o retorno do drone
+FRASES_WARFRAME = [
+    "Ordis está satisfeito. A extração foi um sucesso, Operador.",
+    "A Lotus enviou as coordenadas exatas. O drone retornou com os cofres cheios.",
+    "Nem os Corpus conseguiriam lucrar tanto em tão pouco tempo. Bom trabalho, Tenno.",
+    "Nef Anyo choraria se visse essa quantidade de UCréditos sendo extraída do Vazio.",
+    "O drone desviou das patrulhas Grineer e trouxe sua recompensa intacta.",
+    "Cuidado com os caçadores de recompensa do Stalker, Tenno. Esse carregamento chama atenção.",
+    "Os extratores aguentaram a pressão atmosférica. A carga está pronta para transferência.",
+    "A Sabedoria dos Orokin flui por esses UCréditos. Use-os com sabedoria, Operador."
+]
 
 # ==========================================
 # 1. VIEW DE RESGATE DA CARGA
@@ -100,57 +113,64 @@ class FarmCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.moeda_nome = "UCreditos"
+        
+        # Mapeamento de Durações (Minutos) -> Range de Recompensa (Min, Max)
+        self.tabela_recompensas = {
+            1: (15, 25),
+            5: (60, 100),
+            20: (200, 300),
+            60: (500, 700),
+            180: (1200, 1800)
+        }
 
     @property
     def moeda_emoji(self):
         emoji = discord.utils.get(self.bot.emojis, name="UCreditos")
         return emoji if emoji else "💎"
 
-    @app_commands.command(name="farm", description="Envia um drone para extrair recursos por 60 minutos.")
-    async def iniciar_farm(self, interaction: discord.Interaction):
+    @app_commands.command(name="farm", description="Envia um drone extrator para buscar UCréditos no Vácuo.")
+    @app_commands.describe(duracao="Escolha o tempo da missão. Missões mais longas trazem mais recursos.")
+    @app_commands.choices(duracao=[
+        app_commands.Choice(name="⏱️ 1 Minuto (Missão Rápida)", value=1),
+        app_commands.Choice(name="🏃 5 Minutos (Missão Curta)", value=5),
+        app_commands.Choice(name="🚶‍♂️ 20 Minutos (Missão Média)", value=20),
+        app_commands.Choice(name="⏳ 1 Hora (Missão Longa)", value=60),
+        app_commands.Choice(name="🛌 3 Horas (Missão Profunda)", value=180)
+    ])
+    async def iniciar_farm(self, interaction: discord.Interaction, duracao: app_commands.Choice[int]):
         autor = interaction.user
         agora = datetime.datetime.now(datetime.timezone.utc)
+        minutos = duracao.value
 
-        # 1. Verifica Booster
-        reg_user = await self.bot.db.fetchrow('SELECT booster_ate FROM users WHERE id = $1', autor.id)
-        booster_ativo = reg_user and reg_user['booster_ate'] and reg_user['booster_ate'] > agora
-
-        # 2. Conta Drones Ativos
+        # 1. Verifica se JÁ EXISTE um drone do usuário ativo
         registros_farm = await self.bot.db.fetch("SELECT dados_extras FROM tarefas_agendadas WHERE tipo = 'farm'")
-        drones_ativos = 0
         for r in registros_farm:
             try:
                 dados = json.loads(r['dados_extras'])
                 if dados.get('user_id') == autor.id:
-                    drones_ativos += 1
+                    return await interaction.response.send_message(
+                        embed=criar_embed_erro(autor, "❌ O seu drone já está em missão! Aguarde o retorno dele antes de enviar outro."), 
+                        ephemeral=True
+                    )
             except:
                 pass
 
-        # 3. Limite de Drones
-        limite_drones = 2 if booster_ativo else 1
+        # 2. Rola o dado para saber o ganho base da missão escolhida
+        min_rew, max_rew = self.tabela_recompensas[minutos]
+        ganho_base = random.randint(min_rew, max_rew)
 
-        if drones_ativos >= limite_drones:
-            if booster_ativo:
-                return await interaction.response.send_message(embed=criar_embed_erro(autor, "❌ Os seus **2 drones** já estão em missão! Aguarde o retorno deles."))
-            else:
-                return await interaction.response.send_message(embed=criar_embed_erro(autor, "❌ O seu drone já está em missão! Adquira um **Booster** na `/loja` para enviar um **2º drone simultâneo**."))
-
-        # 4. Valores Fixos
-        minutos = 60
-        ganho_base = 60
         data_entrega = agora + datetime.timedelta(minutes=minutos)
-        drone_num = drones_ativos + 1
 
         embed_inicio = discord.Embed(
-            title=f"🛰️ Extração Iniciada (Drone {drone_num}/{limite_drones})",
+            title="🛰️ Extrator Lançado",
             description=(
-                f"{autor.mention} enviou um drone de extração.\n"
-                f"Tempo estimado de retorno: **60 minutos** (<t:{int(data_entrega.timestamp())}:R>).\n\n"
-                f"⚠️ **ATENÇÃO:** O loot NÃO entrará na sua carteira automaticamente. Você deve clicar no botão de resgate quando o drone voltar, ou os recursos começarão a sumir!"
+                f"{autor.mention} despachou o seu drone extrator para o Vácuo.\n"
+                f"⏳ Tempo de retorno: **{minutos} minuto(s)** (<t:{int(data_entrega.timestamp())}:R>).\n\n"
+                f"⚠️ **ATENÇÃO:** Quando o drone voltar, você deve clicar no botão para resgatar. Se demorar, a carga começará a deteriorar e sumir no vácuo!"
             ),
             color=discord.Color.blue()
         )
-        embed_inicio.set_footer(text="Status: A extrair...")
+        embed_inicio.set_footer(text="Status: Vasculhando destroços...")
         
         await interaction.response.send_message(embed=embed_inicio)
         mensagem_enviada = await interaction.original_response()
@@ -160,7 +180,7 @@ class FarmCog(commands.Cog):
             "ganho": ganho_base,
             "inicio": agora.isoformat(),
             "user_id": autor.id,
-            "drone_num": drone_num
+            "duracao": minutos
         })
 
         await self.bot.db.execute(
@@ -182,9 +202,9 @@ class FarmCog(commands.Cog):
 
         try:
             dados = json.loads(tarefa['dados_extras'])
-            ganho_maximo = dados['ganho']
+            ganho_base = dados['ganho']
             user_id = dados['user_id']
-            drone_num = dados.get('drone_num', 1)
+            duracao = dados.get('duracao', 60)
         except:
             return 
 
@@ -193,25 +213,38 @@ class FarmCog(commands.Cog):
 
         agora = datetime.datetime.now(datetime.timezone.utc)
 
-        descricao = f"Relatório de missão para {membro.mention}:\n\n"
+        # Verifica o BOOSTER na hora da entrega
+        reg_user = await self.bot.db.fetchrow('SELECT booster_ate FROM users WHERE id = $1', user_id)
+        booster_ativo = reg_user and reg_user['booster_ate'] and reg_user['booster_ate'] > agora
+        
+        ganho_final = ganho_base * 2 if booster_ativo else ganho_base
+        
+        texto_booster = ""
+        if booster_ativo:
+            texto_booster = "\n🚀 **BOOSTER ATIVO:** A sua extração foi **DOBRADA**!"
+
+        # Sorteia uma frase de lore do Warframe
+        frase_aleatoria = random.choice(FRASES_WARFRAME)
+
+        descricao = f"*{frase_aleatoria}*\n\n"
         descricao += (
-            f"**Carga Puxada:** {self.moeda_emoji} **{ganho_maximo}** {self.moeda_nome}\n"
-            f"**Tempo da Operação:** 60 minuto(s)\n\n"
+            f"**Carga Puxada:** {self.moeda_emoji} **{ganho_final}** {self.moeda_nome}{texto_booster}\n"
+            f"**Tempo da Operação:** {duracao} minuto(s)\n\n"
             f"⚠️ **DECANDÊNCIA DE CARGA:**\n"
             f"Resgate sua carga rapidamente! O escudo de contenção dura apenas **1 minuto**. "
-            f"Após isso, os recursos cairão gradativamente, chegando a **zero** em 10 minutos."
+            f"Após isso, os recursos começarão a cair, chegando a **zero** em 10 minutos."
         )
 
         embed_final = discord.Embed(
-            title=f"📦 Drone {drone_num} Aguardando Descarregamento",
+            title=f"📦 Extrator Aguardando Descarregamento",
             description=descricao,
-            color=discord.Color.blue()
+            color=discord.Color.purple()
         )
         embed_final.set_thumbnail(url=membro.display_avatar.url)
 
-        # Anexa a View de Resgate à mensagem
-        view = ViewResgateFarm(self.bot, user_id, ganho_maximo, agora, self.moeda_nome, self.moeda_emoji)
-        msg = await canal.send(content=f"🔔 {membro.mention}, o seu drone chegou! Resgate os recursos!", embed=embed_final, view=view)
+        # Anexa a View de Resgate à mensagem (Passando o ganho_final já dobrado, se aplicável)
+        view = ViewResgateFarm(self.bot, user_id, ganho_final, agora, self.moeda_nome, self.moeda_emoji)
+        msg = await canal.send(content=f"🔔 {membro.mention}, o seu drone chegou da missão!", embed=embed_final, view=view)
         
         # Guarda a referência para o timeout poder editar a mensagem
         view.mensagem_original = msg

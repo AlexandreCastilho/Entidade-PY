@@ -37,7 +37,7 @@ class RankCog(commands.Cog):
         ''', interaction.user.id)
 
         # 3. Montagem do Texto do Top 10
-        medalhas = ["🥇", "🥈", "🥉", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+        medalhas = ["🥇", "🥈", "🥉", "#4", "#5", "#6", "#7", "#8", "#9", "#10"]
         descricao_rank = ""
         
         for i, reg in enumerate(top_10):
@@ -47,9 +47,9 @@ class RankCog(commands.Cog):
             
             # Destaca o autor se ele estiver no Top 10
             if user_id == interaction.user.id:
-                descricao_rank += f"{medalhas[i]} **<@{user_id}> ➔ {banco_fmt} {self.moeda_emoji}** (Você)\n"
+                descricao_rank += f"{medalhas[i]} -  **{self.moeda_emoji} {banco_fmt} ➔ <@{user_id}> ** (Você)\n"
             else:
-                descricao_rank += f"{medalhas[i]} <@{user_id}> ➔ {banco_fmt} {self.moeda_emoji}\n"
+                descricao_rank += f"{medalhas[i]} -  {self.moeda_emoji} {banco_fmt} ➔ <@{user_id}>\n"
 
         # 4. Criando a Embed
         embed = discord.Embed(
@@ -66,7 +66,7 @@ class RankCog(commands.Cog):
         else:
             embed.set_footer(text="Você ainda não possui registros no banco de dados.")
 
-        embed.set_thumbnail(url=interaction.guild.icon.url if interaction.guild.icon else None)
+        embed.set_thumbnail(url="https://i.imgur.com/B3rbj9k.png")
 
         await interaction.followup.send(embed=embed)
 

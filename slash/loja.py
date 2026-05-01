@@ -55,10 +55,10 @@ class SeletorCompraBooster(discord.ui.Select):
     def __init__(self, bot):
         self.bot = bot
         self.opcoes = {
-            "1h": {"preco": 100, "duracao": datetime.timedelta(hours=1), "label": "Booster de 1 Hora"},
-            "1d": {"preco": 250, "duracao": datetime.timedelta(days=1), "label": "Booster de 1 Dia"},
-            "3d": {"preco": 700, "duracao": datetime.timedelta(days=3), "label": "Booster de 3 Dias"},
-            "7d": {"preco": 1200, "duracao": datetime.timedelta(days=7), "label": "Booster de 7 Dias"}
+            "1h": {"preco": 2000, "duracao": datetime.timedelta(hours=1), "label": "Booster de 1 Hora"},
+            "1d": {"preco": 5000, "duracao": datetime.timedelta(days=1), "label": "Booster de 1 Dia"},
+            "3d": {"preco": 15000, "duracao": datetime.timedelta(days=3), "label": "Booster de 3 Dias"},
+            "7d": {"preco": 25000, "duracao": datetime.timedelta(days=7), "label": "Booster de 7 Dias"}
         }
 
         options = [
@@ -178,9 +178,8 @@ class LojaLayout(discord.ui.LayoutView):
         container.add_item(discord.ui.TextDisplay(content="# 🛒 Mercado da Entidade\nUse seus UCréditos acumulados no banco para adquirir melhorias e cargos exclusivos."))
         container.add_item(discord.ui.TextDisplay(content=f"## 🎭 Cargos à Venda\nSelecione um cargo abaixo para comprar:\n{texto_cargos}"))
         container.add_item(discord.ui.ActionRow(SeletorCompraCargo(bot, options_cargos)))
-        container.add_item(discord.ui.TextDisplay(content=f"## 🚀 Boosters de UCreditos\nAtive um Booster para **dobrar (x2)** seus ganhos de Chat, Voz e Farm.\n- 1 Hora: **100** {emoji_uc}\n- 1 Dia: **250** {emoji_uc}\n- 3 Dias: **700** {emoji_uc}\n- 7 Dias: **1.200** {emoji_uc}"))
+        container.add_item(discord.ui.TextDisplay(content=f"## 🚀 Boosters de UCreditos\nAtive um Booster para **dobrar (x2)** seus ganhos de Chat, Voz e Farm.\n- 1 Hora: **2.000** {emoji_uc}\n- 1 Dia: **5.000** {emoji_uc}\n- 3 Dias: **15.000** {emoji_uc}\n- 7 Dias: **25.000** {emoji_uc}"))
         container.add_item(discord.ui.ActionRow(SeletorCompraBooster(bot)))
-        container.add_item(discord.ui.TextDisplay(content=f"## 💰 Como ganhar UCréditos?\n- **Voz:** 2 {emoji_uc} por minuto em call.\n- **Chat:** 1 {emoji_uc} por mensagem (1 min cooldown).\n- **Comando:** Use `/farm` para iniciar uma extração."))
         
         self.add_item(container)
 

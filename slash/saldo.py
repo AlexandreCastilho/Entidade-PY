@@ -25,14 +25,10 @@ async def gerar_embed_saldo(bot, alvo: discord.Member, moeda_nome: str, moeda_em
     booster_ativo = booster_ate and booster_ate > agora
 
     if booster_ativo:
-        ganho_voz = 4
-        ganho_chat = 2
         timestamp = int(booster_ate.timestamp())
         texto_booster = f"🚀Booster ativo até <t:{timestamp}:f> (<t:{timestamp}:R>)!"
         cor_embed = discord.Color.gold()
     else:
-        ganho_voz = 2
-        ganho_chat = 1
         texto_booster = f"Use /loja para comprar um booster e dobrar seus ganhos!"
         cor_embed = discord.Color.dark_purple()
 
@@ -41,7 +37,6 @@ async def gerar_embed_saldo(bot, alvo: discord.Member, moeda_nome: str, moeda_em
     embed.set_thumbnail(url=url_UCreditos)
     embed.add_field(name="Carteira", value=f"{moeda_emoji} **{carteira:,}** {moeda_nome}".replace(',', '.'), inline=True)
     embed.add_field(name="Banco", value=f"{moeda_emoji} **{banco:,}** {moeda_nome}".replace(',', '.'), inline=True)
-    embed.add_field(name="Ganhos", value=f"🎙️ Voz: **{ganho_voz}** {moeda_emoji}/min\n💬 Chat: **{ganho_chat}** {moeda_emoji}/msg", inline=True)
     
     if booster_ativo:
         embed.add_field(name="", value=f"{texto_booster}", inline=False)
@@ -49,6 +44,51 @@ async def gerar_embed_saldo(bot, alvo: discord.Member, moeda_nome: str, moeda_em
         embed.set_footer(text=texto_booster)
 
     return embed
+
+async def verificar_magnata(bot, interaction: discord.Interaction):
+    """Verifica quem é o líder do banco e gerencia o cargo de Magnata."""
+    if not interaction.guild:
+        return
+
+    CARGO_MAGNATA_ID = 1498029922378190969
+
+    # 1. Busca o ID do atual líder no Banco
+    lider_db = await bot.db.fetchrow('SELECT id FROM users ORDER BY banco DESC LIMIT 1')
+    if not lider_db:
+        return
+    
+    id_lider_atual = lider_db['id']
+    cargo = interaction.guild.get_role(CARGO_MAGNATA_ID)
+    if not cargo:
+        return
+
+    # 2. Verifica quem possui o cargo atualmente no servidor
+    membro_com_cargo = next((m for m in cargo.members), None)
+    
+    # 3. Se o dono do cargo mudou, fazemos a troca
+    if not membro_com_cargo or membro_com_cargo.id != id_lider_atual:
+        # Remover de quem tinha
+        if membro_com_cargo:
+            try: 
+                await membro_com_cargo.remove_roles(cargo, reason="Perdeu o posto de Magnata.")
+            except: 
+                pass
+
+        # Adicionar ao novo líder
+        novo_lider = interaction.guild.get_member(id_lider_atual)
+        if novo_lider:
+            try:
+                await novo_lider.add_roles(cargo, reason="Novo líder do Banco Cósmico.")
+                
+                # Anúncio Dourado
+                embed_magnata = discord.Embed(
+                    title="👑 NOVO MAGNATA NO TRONO!",
+                    description=f"Curvem-se! {novo_lider.mention} agora detém a maior fortuna bancária da União Cósmica e assumiu o manto de Magnata.",
+                    color=discord.Color.gold()
+                )
+                await interaction.channel.send(embed=embed_magnata)
+            except:
+                pass
 
 async def processar_transacao_direta(bot, interaction: discord.Interaction, acao: str, valor_str: str, moeda_nome: str, moeda_emoji: str):
     """Motor central que processa os depósitos e saques para evitar código repetido."""
@@ -81,6 +121,8 @@ async def processar_transacao_direta(bot, interaction: discord.Interaction, acao
         texto = f"✅ Sacado **{valor:,}** {moeda_nome} para a carteira!".replace(',', '.')
 
     await bot.db.execute('UPDATE users SET carteira = $1, banco = $2 WHERE id = $3', nova_cart, novo_banc, interaction.user.id)
+    
+    await verificar_magnata(bot, interaction)
 
     embed = await gerar_embed_saldo(bot, interaction.user, moeda_nome, moeda_emoji)
     embed.description = f"{texto}\n\n"
@@ -221,6 +263,46 @@ class ViewSaldo(discord.ui.View):
     async def btn_roubar(self, interaction: discord.Interaction, button: discord.ui.Button):
         await executar_roubo(self.bot, interaction, self.dono_id, self.moeda_nome, self.moeda_emoji)
 
+    @discord.ui.button(label="Informações", style=discord.ButtonStyle.primary, emoji="ℹ️")
+    async def btn_info(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # 1. Busca os dados de farm do usuário
+        reg_user = await self.bot.db.fetchrow('SELECT tempo_voz_diario, data_ultimo_farm_voz FROM users WHERE id = $1', interaction.user.id)
+        
+        # 2. Calcula se a data bate com o ciclo de farm atual (após as 06:00 BRT)
+        agora_utc = datetime.datetime.now(datetime.timezone.utc)
+        data_farm_hoje = (agora_utc - datetime.timedelta(hours=9)).date()
+        
+        minutos_acumulados = 0
+        if reg_user and reg_user['data_ultimo_farm_voz'] == data_farm_hoje:
+            minutos_acumulados = reg_user['tempo_voz_diario'] or 0
+
+        # Monta a descrição atualizada
+        descricao = (
+            f"**🎙️ Farm em Canais de Voz:**\n"
+            f"⏱️ **Progresso de Hoje:** Você já acumulou **{minutos_acumulados}/360 minutos** em chamadas.\n\n"
+            f"Você pode farmar até **5.000 {self.moeda_nome}** por dia (o limite reseta às 06:00 BRT). "
+            f"O rendimento diminui conforme você passa tempo na call:\n"
+            f"• **0m a 30m:** ~50/min *(Rende 1.500)*\n"
+            f"• **30m a 1h:** ~33/min *(Rende 1.000)*\n"
+            f"• **1h a 2h:** ~16/min *(Rende 1.000)*\n"
+            f"• **2h a 3h:** ~8/min *(Rende 500)*\n"
+            f"• **3h a 6h:** ~5/min *(Rende 1.000)*\n\n"
+            
+            f"**💬 Farm no Chat:**\n"
+            f"• **100 {self.moeda_nome}** por mensagem válida.\n"
+            f"• Há um intervalo de descanso (cooldown) de **5 minutos** entre cada ganho.\n\n"
+            
+            f"🚀 **Boosters:**\n"
+            f"Ter um Booster ativo **dobra (x2)** todos os valores acima!"
+        )
+        
+        embed_info = discord.Embed(
+            title="📈 Como Ganhar UCréditos",
+            description=descricao,
+            color=discord.Color.blurple()
+        )
+        await interaction.response.send_message(embed=embed_info, ephemeral=True)
+
 # ==========================================
 # 4. A COG E OS COMANDOS PRINCIPAIS
 # ==========================================
@@ -256,6 +338,7 @@ class EconomiaCog(commands.Cog):
         view = ViewSaldo(self.bot, alvo.id, self.moeda_nome, self.moeda_emoji)
         
         await interaction.followup.send(embed=embed, view=view)
+        await verificar_magnata(self.bot, interaction)
         view.mensagem_original = await interaction.original_response()
 
     # --- COMANDOS DE BARRA (/saldo, /depositar, /sacar, /roubar) ---

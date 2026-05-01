@@ -6,8 +6,8 @@ class FarmChatCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         
-        # Cria um mapeamento de cooldown: 1 recompensa a cada 60 segundos por USUÁRIO
-        self.cooldown = commands.CooldownMapping.from_cooldown(1, 60.0, commands.BucketType.user)
+        # Cria um mapeamento de cooldown: 1 recompensa a cada 300 segundos (5 minutos) por USUÁRIO
+        self.cooldown = commands.CooldownMapping.from_cooldown(1, 300.0, commands.BucketType.user)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -28,7 +28,7 @@ class FarmChatCog(commands.Cog):
 
         # 4. Lógica de Recompensa e Booster
         try:
-            ganho = 1 # O ganho padrão por mensagem
+            ganho = 100 # O novo ganho padrão por mensagem
             
             # Verifica se o Tenno tem um booster ativo na base de dados
             reg_user = await self.bot.db.fetchrow('SELECT booster_ate FROM users WHERE id = $1', message.author.id)
@@ -37,7 +37,7 @@ class FarmChatCog(commands.Cog):
                 agora = datetime.datetime.now(datetime.timezone.utc)
                 # Se a data de validade for maior que o momento atual, o booster está ativo!
                 if reg_user['booster_ate'] > agora:
-                    ganho *= 2 # Multiplica o ganho por 2
+                    ganho *= 2 # Multiplica o ganho por 2 (ficando 200 UCréditos)
 
             # 5. Adiciona o UCrédito na Carteira de forma silenciosa
             await self.bot.db.execute(
