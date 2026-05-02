@@ -7,13 +7,58 @@ import math
 import random
 
 # ==========================================
-# FUNÇÃO AUXILIAR DE ERRO E LISTAS
+# FUNÇÕES AUXILIARES E LISTAS
 # ==========================================
 def criar_embed_erro(usuario: discord.Member, mensagem: str):
     """Cria uma embed padronizada vermelha para erros e falhas."""
     embed = discord.Embed(description=mensagem, color=discord.Color.red())
     embed.set_author(name=usuario.display_name, icon_url=usuario.display_avatar.url)
     return embed
+
+async def verificar_rei_dos_ladroes(bot, interaction: discord.Interaction):
+    """Verifica quem é o maior ladrão (total_roubado) e gerencia o cargo exclusivo."""
+    if not interaction.guild:
+        return
+
+    CARGO_LADRAO_ID = 1499624575581814815
+
+    # 1. Busca o ID do atual líder em roubos
+    lider_db = await bot.db.fetchrow('SELECT id FROM users ORDER BY total_roubado DESC LIMIT 1')
+    if not lider_db or not lider_db['id']:
+        return
+    
+    id_lider_atual = lider_db['id']
+    cargo = interaction.guild.get_role(CARGO_LADRAO_ID)
+    if not cargo:
+        return
+
+    # 2. Verifica quem possui o cargo atualmente no servidor
+    membro_com_cargo = next((m for m in cargo.members), None)
+    
+    # 3. Se o dono do cargo mudou, fazemos a troca
+    if not membro_com_cargo or membro_com_cargo.id != id_lider_atual:
+        # Remover de quem tinha
+        if membro_com_cargo:
+            try: 
+                await membro_com_cargo.remove_roles(cargo, reason="Perdeu o posto de Maior Ladrão.")
+            except: 
+                pass
+
+        # Adicionar ao novo líder
+        novo_lider = interaction.guild.get_member(id_lider_atual)
+        if novo_lider:
+            try:
+                await novo_lider.add_roles(cargo, reason="Tornou-se a maior ameaça do submundo.")
+                
+                # Anúncio Sombrio
+                embed_ladrao = discord.Embed(
+                    title="🦹 NOVO REI DO SUBMUNDO!",
+                    description=f"Tranquem seus cofres! {novo_lider.mention} acumulou a maior fortuna ilícita da Entidade e assumiu o controle do submundo.",
+                    color=discord.Color.dark_red()
+                )
+                await interaction.channel.send(embed=embed_ladrao)
+            except:
+                pass
 
 # Frases temáticas de Warframe para o retorno do drone
 FRASES_WARFRAME = [
@@ -55,15 +100,21 @@ class ViewResgateFarm(discord.ui.View):
 
     @discord.ui.button(label="Resgatar Carga", style=discord.ButtonStyle.green, emoji="📦")
     async def btn_resgatar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.dono_id:
-            return await interaction.response.send_message(embed=criar_embed_erro(interaction.user, "❌ Apenas o dono deste drone pode abrir este compartimento de carga."))
-
         # 1. Calcular o tempo exato decorrido
         agora = datetime.datetime.now(datetime.timezone.utc)
         segundos_passados = (agora - self.finish_time).total_seconds()
         minutos_passados = segundos_passados / 60.0
 
-        # 2. Lógica de Decaimento
+        is_dono = interaction.user.id == self.dono_id
+
+        # 2. Lógica do Roubo / Escudo
+        if not is_dono and minutos_passados <= 1.0:
+            return await interaction.response.send_message(
+                embed=criar_embed_erro(interaction.user, "❌ O escudo de contenção ainda está ativo! Apenas o dono do drone pode acessar a carga neste primeiro minuto."), 
+                ephemeral=True
+            )
+
+        # 3. Lógica de Decaimento
         if minutos_passados <= 1.0:
             ganho_final = self.ganho_maximo
         elif minutos_passados >= 10.0:
@@ -80,19 +131,30 @@ class ViewResgateFarm(discord.ui.View):
             embed.add_field(name="💀 Carga Perdida", value="Você demorou demais e não sobrou nada da carga para resgatar.", inline=False)
             return await interaction.response.edit_message(view=self, embed=embed)
 
-        # 3. Atualiza a Carteira no BD
-        await self.bot.db.execute(
-            '''INSERT INTO users (id, carteira) VALUES ($1, $2)
-               ON CONFLICT (id) DO UPDATE SET carteira = users.carteira + EXCLUDED.carteira''',
-            self.dono_id, ganho_final
-        )
+        # 4. Atualiza a Carteira no BD (Com registro de crime se for roubo)
+        if is_dono:
+            await self.bot.db.execute(
+                '''INSERT INTO users (id, carteira) VALUES ($1, $2)
+                   ON CONFLICT (id) DO UPDATE SET carteira = users.carteira + EXCLUDED.carteira''',
+                interaction.user.id, ganho_final
+            )
+        else:
+            # Se não é o dono, é roubo! Soma na carteira e no total_roubado
+            await self.bot.db.execute(
+                '''INSERT INTO users (id, carteira, total_roubado) VALUES ($1, $2, $3)
+                   ON CONFLICT (id) DO UPDATE SET 
+                   carteira = users.carteira + EXCLUDED.carteira,
+                   total_roubado = COALESCE(users.total_roubado, 0) + EXCLUDED.total_roubado''',
+                interaction.user.id, ganho_final, ganho_final
+            )
+            # Verifica se essa ousadia deu a ele a coroa do submundo
+            await verificar_rei_dos_ladroes(self.bot, interaction)
 
-        # 4. Atualiza a interface
+        # 5. Atualiza a interface
         for child in self.children:
             child.disabled = True
             
         embed = interaction.message.embeds[0]
-        embed.color = discord.Color.brand_green()
         
         perda = self.ganho_maximo - ganho_final
         if perda > 0:
@@ -100,7 +162,12 @@ class ViewResgateFarm(discord.ui.View):
         else:
             detalhe_perda = "\n⚡ Resgate instantâneo perfeito! Carga máxima garantida."
 
-        embed.add_field(name="✅ Resgate Bem-sucedido", value=f"Você transferiu **{ganho_final}** {self.moeda_emoji} para sua carteira.{detalhe_perda}", inline=False)
+        if is_dono:
+            embed.color = discord.Color.brand_green()
+            embed.add_field(name="✅ Resgate Bem-sucedido", value=f"Você transferiu **{ganho_final}** {self.moeda_emoji} para sua carteira.{detalhe_perda}", inline=False)
+        else:
+            embed.color = discord.Color.dark_red()
+            embed.add_field(name="🏴‍☠️ Carga Roubada!", value=f"{interaction.user.mention} hackeou o terminal e roubou **{ganho_final}** {self.moeda_emoji} que pertenciam ao drone!{detalhe_perda}", inline=False)
         
         await interaction.response.edit_message(view=self, embed=embed)
         self.stop() 
@@ -143,13 +210,14 @@ class FarmCog(commands.Cog):
         minutos = duracao.value
 
         # 1. Verifica se JÁ EXISTE um drone do usuário ativo
-        registros_farm = await self.bot.db.fetch("SELECT dados_extras FROM tarefas_agendadas WHERE tipo = 'farm'")
+        registros_farm = await self.bot.db.fetch("SELECT data_execucao, dados_extras FROM tarefas_agendadas WHERE tipo = 'farm'")
         for r in registros_farm:
             try:
                 dados = json.loads(r['dados_extras'])
                 if dados.get('user_id') == autor.id:
+                    tempo_retorno = int(r['data_execucao'].timestamp())
                     return await interaction.response.send_message(
-                        embed=criar_embed_erro(autor, "❌ O seu drone já está em missão! Aguarde o retorno dele antes de enviar outro."), 
+                        embed=criar_embed_erro(autor, f"❌ O seu drone já está em missão! Ele retornará <t:{tempo_retorno}:R>."), 
                         ephemeral=True
                     )
             except:
@@ -166,7 +234,7 @@ class FarmCog(commands.Cog):
             description=(
                 f"{autor.mention} despachou o seu drone extrator para o Vácuo.\n"
                 f"⏳ Tempo de retorno: **{minutos} minuto(s)** (<t:{int(data_entrega.timestamp())}:R>).\n\n"
-                f"⚠️ **ATENÇÃO:** Quando o drone voltar, você deve clicar no botão para resgatar. Se demorar, a carga começará a deteriorar e sumir no vácuo!"
+                f"⚠️ **ATENÇÃO:** Quando o drone voltar, você deve clicar no botão para resgatar. Se demorar, a carga começará a deteriorar e, após 1 minuto, **outros jogadores poderão roubá-la**!"
             ),
             color=discord.Color.blue()
         )
@@ -230,9 +298,9 @@ class FarmCog(commands.Cog):
         descricao += (
             f"**Carga Puxada:** {self.moeda_emoji} **{ganho_final}** {self.moeda_nome}{texto_booster}\n"
             f"**Tempo da Operação:** {duracao} minuto(s)\n\n"
-            f"⚠️ **DECANDÊNCIA DE CARGA:**\n"
+            f"⚠️ **PERIGO - DECAIMENTO & ROUBO:**\n"
             f"Resgate sua carga rapidamente! O escudo de contenção dura apenas **1 minuto**. "
-            f"Após isso, os recursos começarão a cair, chegando a **zero** em 10 minutos."
+            f"Após isso, os recursos começam a sumir e **qualquer um poderá hackear o drone e roubar a carga**."
         )
 
         embed_final = discord.Embed(

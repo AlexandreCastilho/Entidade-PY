@@ -90,6 +90,52 @@ async def verificar_magnata(bot, interaction: discord.Interaction):
             except:
                 pass
 
+async def verificar_rei_dos_ladroes(bot, interaction: discord.Interaction):
+    """Verifica quem é o maior ladrão (total_roubado) e gerencia o cargo exclusivo."""
+    if not interaction.guild:
+        return
+
+    CARGO_LADRAO_ID = 1499624575581814815
+
+    # 1. Busca o ID do atual líder em roubos
+    lider_db = await bot.db.fetchrow('SELECT id FROM users ORDER BY total_roubado DESC LIMIT 1')
+    # Se o banco retornar vazio ou o recorde for 0/nulo, não faz nada
+    if not lider_db or not lider_db['id']:
+        return
+    
+    id_lider_atual = lider_db['id']
+    cargo = interaction.guild.get_role(CARGO_LADRAO_ID)
+    if not cargo:
+        return
+
+    # 2. Verifica quem possui o cargo atualmente no servidor
+    membro_com_cargo = next((m for m in cargo.members), None)
+    
+    # 3. Se o dono do cargo mudou, fazemos a troca
+    if not membro_com_cargo or membro_com_cargo.id != id_lider_atual:
+        # Remover de quem tinha
+        if membro_com_cargo:
+            try: 
+                await membro_com_cargo.remove_roles(cargo, reason="Perdeu o posto de Maior Ladrão.")
+            except: 
+                pass
+
+        # Adicionar ao novo líder
+        novo_lider = interaction.guild.get_member(id_lider_atual)
+        if novo_lider:
+            try:
+                await novo_lider.add_roles(cargo, reason="Tornou-se a maior ameaça do submundo.")
+                
+                # Anúncio Sombrio
+                embed_ladrao = discord.Embed(
+                    title="🦹 NOVO REI DO SUBMUNDO!",
+                    description=f"Tranquem seus cofres! {novo_lider.mention} acumulou a maior fortuna ilícita da Entidade e assumiu o controle do submundo.",
+                    color=discord.Color.dark_red()
+                )
+                await interaction.channel.send(embed=embed_ladrao)
+            except:
+                pass
+
 async def processar_transacao_direta(bot, interaction: discord.Interaction, acao: str, valor_str: str, moeda_nome: str, moeda_emoji: str):
     """Motor central que processa os depósitos e saques para evitar código repetido."""
     registro = await bot.db.fetchrow('SELECT carteira, banco FROM users WHERE id = $1', interaction.user.id)
@@ -171,11 +217,19 @@ async def executar_roubo(bot, interaction: discord.Interaction, alvo_id: int, mo
         perda_no_vacuo = math.ceil(valor_extraido * 0.20)
         ganho_ladrao = valor_extraido - perda_no_vacuo
 
+        # Desconta da vítima
         await bot.db.execute('UPDATE users SET carteira = carteira - $1 WHERE id = $2', valor_extraido, alvo_id)
+        
+        # Insere na carteira do ladrão E atualiza a coluna total_roubado
         await bot.db.execute('''
-            INSERT INTO users (id, carteira) VALUES ($1, $2)
-            ON CONFLICT (id) DO UPDATE SET carteira = users.carteira + EXCLUDED.carteira
-        ''', interaction.user.id, ganho_ladrao)
+            INSERT INTO users (id, carteira, total_roubado) VALUES ($1, $2, $3)
+            ON CONFLICT (id) DO UPDATE SET 
+            carteira = users.carteira + EXCLUDED.carteira,
+            total_roubado = COALESCE(users.total_roubado, 0) + EXCLUDED.total_roubado
+        ''', interaction.user.id, ganho_ladrao, ganho_ladrao)
+
+        # >>>> CHAMA A VERIFICAÇÃO DO MAIOR LADRÃO AQUI <<<<
+        await verificar_rei_dos_ladroes(bot, interaction)
 
         texto_crime = (
             f"🎯 **Roubo executado com sucesso!**\n"

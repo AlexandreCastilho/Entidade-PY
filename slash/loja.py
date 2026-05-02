@@ -56,9 +56,9 @@ class SeletorCompraBooster(discord.ui.Select):
         self.bot = bot
         self.opcoes = {
             "1h": {"preco": 2000, "duracao": datetime.timedelta(hours=1), "label": "Booster de 1 Hora"},
-            "1d": {"preco": 5000, "duracao": datetime.timedelta(days=1), "label": "Booster de 1 Dia"},
-            "3d": {"preco": 15000, "duracao": datetime.timedelta(days=3), "label": "Booster de 3 Dias"},
-            "7d": {"preco": 25000, "duracao": datetime.timedelta(days=7), "label": "Booster de 7 Dias"}
+            "1d": {"preco": 3500, "duracao": datetime.timedelta(days=1), "label": "Booster de 1 Dia"},
+            "3d": {"preco": 9000, "duracao": datetime.timedelta(days=3), "label": "Booster de 3 Dias"},
+            "7d": {"preco": 17500, "duracao": datetime.timedelta(days=7), "label": "Booster de 7 Dias"}
         }
 
         options = [
@@ -178,7 +178,7 @@ class LojaLayout(discord.ui.LayoutView):
         container.add_item(discord.ui.TextDisplay(content="# 🛒 Mercado da Entidade\nUse seus UCréditos acumulados no banco para adquirir melhorias e cargos exclusivos."))
         container.add_item(discord.ui.TextDisplay(content=f"## 🎭 Cargos à Venda\nSelecione um cargo abaixo para comprar:\n{texto_cargos}"))
         container.add_item(discord.ui.ActionRow(SeletorCompraCargo(bot, options_cargos)))
-        container.add_item(discord.ui.TextDisplay(content=f"## 🚀 Boosters de UCreditos\nAtive um Booster para **dobrar (x2)** seus ganhos de Chat, Voz e Farm.\n- 1 Hora: **2.000** {emoji_uc}\n- 1 Dia: **5.000** {emoji_uc}\n- 3 Dias: **15.000** {emoji_uc}\n- 7 Dias: **25.000** {emoji_uc}"))
+        container.add_item(discord.ui.TextDisplay(content=f"## 🚀 Boosters de UCreditos\nAtive um Booster para **dobrar (x2)** seus ganhos de Chat, Voz e Farm.\n- 1 Hora: **2.000** {emoji_uc}\n- 1 Dia: **3.500** {emoji_uc}\n- 3 Dias: **9.000** {emoji_uc}\n- 7 Dias: **17.500** {emoji_uc}"))
         container.add_item(discord.ui.ActionRow(SeletorCompraBooster(bot)))
         
         self.add_item(container)

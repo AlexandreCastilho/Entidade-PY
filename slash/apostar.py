@@ -4,15 +4,62 @@ from discord import app_commands
 import random
 import math
 
+# ID do Cargo de Melhor Apostador (Exclusivo do 1º lugar em apostas)
+CARGO_APOSTADOR_ID = 1500145598794563816
+
 # ==========================================
 # LÓGICA CENTRAL DA APOSTA (Extraída do Modal)
 # ==========================================
+async def verificar_rei_do_tigrinho(bot, interaction: discord.Interaction):
+    """Verifica quem é o líder de apostas e gerencia o cargo exclusivo."""
+    if not interaction.guild:
+        return
+
+    # 1. Busca o ID do atual líder no balanço de apostas
+    lider_db = await bot.db.fetchrow('SELECT id FROM users ORDER BY balanco_apostas DESC LIMIT 1')
+    if not lider_db or not lider_db['id']:
+        return
+    
+    id_lider_atual = lider_db['id']
+    cargo = interaction.guild.get_role(CARGO_APOSTADOR_ID)
+    if not cargo:
+        return
+
+    # 2. Verifica quem possui o cargo atualmente no servidor
+    membro_com_cargo = next((m for m in cargo.members), None)
+    
+    # 3. Se o dono do cargo mudou, fazemos a troca
+    if not membro_com_cargo or membro_com_cargo.id != id_lider_atual:
+        # Remover de quem tinha
+        if membro_com_cargo:
+            try: 
+                await membro_com_cargo.remove_roles(cargo, reason="Perdeu o posto de Rei do Tigrinho.")
+            except: 
+                pass
+
+        # Adicionar ao novo líder
+        novo_lider = interaction.guild.get_member(id_lider_atual)
+        if novo_lider:
+            try:
+                await novo_lider.add_roles(cargo, reason="Tornou-se a lenda do cassino.")
+                
+                # Anúncio Temático
+                embed_tigrinho = discord.Embed(
+                    title="🎲 TEMOS UM NOVO REI DO CASSINO!",
+                    description=f"A sorte sorri para {novo_lider.mention}! Com os bolsos cheios e a maior taxa de sucesso, ele acaba de ser coroado o **Rei do Tigrinho**.",
+                    color=discord.Color.green()
+                )
+                await interaction.channel.send(embed=embed_tigrinho)
+            except:
+                pass
+
 async def processar_aposta(bot, interaction: discord.Interaction, valor_input: str, prob_vitoria: int, multiplicador: float, moeda_emoji: str):
     # 1. Busca saldo na carteira primeiro para validar o All-in
     reg_user = await bot.db.fetchrow('SELECT carteira FROM users WHERE id = $1', interaction.user.id)
     carteira = reg_user['carteira'] if reg_user and reg_user['carteira'] else 0
 
-    aposta_minima = math.ceil(1 / (0.95 * (multiplicador - 1)))
+    # Atualizado de 0.95 para 0.99 (referente à taxa de 1%)
+    aposta_minima = math.ceil(1 / (0.99 * (multiplicador - 1)))
     entrada = str(valor_input).strip() if valor_input else ""
     
     # 2. Lógica do All-in ou Valor Específico
@@ -42,7 +89,7 @@ async def processar_aposta(bot, interaction: discord.Interaction, valor_input: s
             ephemeral=True
         )
 
-    # 4. Retira o valor da carteira
+    # 4. Retira o valor da carteira na hora de apostar
     await bot.db.execute('UPDATE users SET carteira = carteira - $1 WHERE id = $2', valor, interaction.user.id)
 
     # 5. Sorteio
@@ -53,11 +100,18 @@ async def processar_aposta(bot, interaction: discord.Interaction, valor_input: s
 
     if venceu:
         lucro_bruto = (valor * multiplicador) - valor
-        taxa = lucro_bruto * 0.05
+        # Atualizado de 0.05 para 0.01 (Taxa de 1%)
+        taxa = lucro_bruto * 0.01
         lucro_final = math.floor(lucro_bruto - taxa)
         total_devolvido = valor + lucro_final
 
-        await bot.db.execute('UPDATE users SET carteira = carteira + $1 WHERE id = $2', total_devolvido, interaction.user.id)
+        # Atualiza a carteira e o balanço de apostas
+        await bot.db.execute('''
+            UPDATE users SET 
+            carteira = carteira + $1, 
+            balanco_apostas = COALESCE(balanco_apostas, 0) + $2 
+            WHERE id = $3
+        ''', total_devolvido, lucro_final, interaction.user.id)
 
         embed = discord.Embed(
             title=f"🎊 VITÓRIA NA MESA!{tag_all_in}",
@@ -71,6 +125,13 @@ async def processar_aposta(bot, interaction: discord.Interaction, valor_input: s
             color=discord.Color.gold()
         )
     else:
+        # Quando perde, reduzimos o valor do balanço de apostas
+        await bot.db.execute('''
+            UPDATE users SET 
+            balanco_apostas = COALESCE(balanco_apostas, 0) - $1 
+            WHERE id = $2
+        ''', valor, interaction.user.id)
+
         embed = discord.Embed(
             title=f"💀 O Vácuo Consumiu!{tag_all_in}",
             description=(
@@ -80,6 +141,9 @@ async def processar_aposta(bot, interaction: discord.Interaction, valor_input: s
             ).replace(',', '.'),
             color=discord.Color.red()
         )
+
+    # >>>> Verifica se temos um novo Rei das Apostas <<<<
+    await verificar_rei_do_tigrinho(bot, interaction)
 
     embed.set_footer(text="Clique nos botões abaixo para fazer novas apostas!")
     
@@ -104,7 +168,8 @@ class ModalDefinirAposta(discord.ui.Modal):
         self.multiplicador = multiplicador
         self.moeda_emoji = moeda_emoji
         
-        self.aposta_minima = math.ceil(1 / (0.95 * (multiplicador - 1)))
+        # Atualizado de 0.95 para 0.99 (referente à taxa de 1%)
+        self.aposta_minima = math.ceil(1 / (0.99 * (multiplicador - 1)))
         
         self.valor_input = discord.ui.TextInput(
             label=f"Aposta (Mínimo: {self.aposta_minima})",
@@ -149,33 +214,33 @@ class ApostarView(discord.ui.View):
 
     @discord.ui.button(label="Aposta Arriscada", style=discord.ButtonStyle.danger)
     async def btn_arriscada(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(ModalDefinirAposta(self.bot, 5, 20.0, self.moeda_emoji))
+        await interaction.response.send_modal(ModalDefinirAposta(self.bot, 10, 10.0, self.moeda_emoji))
 
     @discord.ui.button(label="Detalhes", style=discord.ButtonStyle.secondary, emoji="ℹ️")
     async def btn_detalhes(self, interaction: discord.Interaction, button: discord.ui.Button):
         detalhes_embed = discord.Embed(
             title="📊 Como funcionam as Apostas?",
             description=(
-                f"O lucro líquido de cada vitória tem uma pequena taxa de 5% retida pela casa.\n"
+                f"O lucro líquido de cada vitória tem uma pequena taxa de 1% retida pela casa.\n"
                 f"Veja os exemplos abaixo imaginando uma aposta de **1.000 {self.moeda_emoji}**:\n\n"
                 
                 f"🟢 **Aposta Fácil (90% de chance)**\n"
                 f"Aposta muito segura, mas o retorno é baixo (1.1x).\n"
                 f"• *Lucro Bruto:* 100 {self.moeda_emoji}\n"
-                f"• *Taxa (5%):* 5 {self.moeda_emoji}\n"
-                f"• *Se ganhar, recebe de volta:* **1.095 {self.moeda_emoji}**\n\n"
+                f"• *Taxa (1%):* 1 {self.moeda_emoji}\n"
+                f"• *Se ganhar, recebe de volta:* **1.099 {self.moeda_emoji}**\n\n"
                 
                 f"🔵 **Aposta Normal (50% de chance)**\n"
                 f"O clássico 'dobro ou nada' (2x).\n"
                 f"• *Lucro Bruto:* 1.000 {self.moeda_emoji}\n"
-                f"• *Taxa (5%):* 50 {self.moeda_emoji}\n"
-                f"• *Se ganhar, recebe de volta:* **1.950 {self.moeda_emoji}**\n\n"
+                f"• *Taxa (1%):* 10 {self.moeda_emoji}\n"
+                f"• *Se ganhar, recebe de volta:* **1.990 {self.moeda_emoji}**\n\n"
                 
-                f"🔴 **Aposta Arriscada (5% de chance)**\n"
-                f"Para os corajosos! Risco extremo, mas o pagamento é massivo (20x).\n"
-                f"• *Lucro Bruto:* 20.000 {self.moeda_emoji}\n"
-                f"• *Taxa (5%):* 950 {self.moeda_emoji}\n"
-                f"• *Se ganhar, recebe de volta:* **19.050 {self.moeda_emoji}**"
+                f"🔴 **Aposta Arriscada (10% de chance)**\n"
+                f"Para os corajosos! Risco alto, mas o pagamento é generoso (10x).\n"
+                f"• *Lucro Bruto:* 9.000 {self.moeda_emoji}\n"
+                f"• *Taxa (1%):* 90 {self.moeda_emoji}\n"
+                f"• *Se ganhar, recebe de volta:* **9.910 {self.moeda_emoji}**"
             ),
             color=discord.Color.light_grey()
         )
@@ -202,7 +267,7 @@ class ApostarCog(commands.Cog):
     @app_commands.choices(dificuldade=[
         app_commands.Choice(name="Fácil (90% | 1.1x)", value="facil"),
         app_commands.Choice(name="Normal (50% | 2.0x)", value="normal"),
-        app_commands.Choice(name="Arriscado (5% | 20.0x)", value="arriscado")
+        app_commands.Choice(name="Arriscado (10% | 10.0x)", value="arriscado")
     ])
     async def apostar(self, interaction: discord.Interaction, dificuldade: app_commands.Choice[str] = None, valor: str = None):
         
@@ -214,7 +279,7 @@ class ApostarCog(commands.Cog):
                     "Bem-vindo à mesa da Entidade Cósmica!\n\n"
                     "💰 As apostas utilizam o saldo da sua **Carteira**.\n"
                     "🔥 Deixe o valor em branco para dar **ALL-IN**.\n"
-                    "⚖️ A casa retém **5% do lucro** nas vitórias.\n\n"
+                    "⚖️ A casa retém **1% do lucro** nas vitórias.\n\n"
                     "Escolha a sua modalidade de risco nos botões abaixo:"
                 ),
                 color=discord.Color.blue()
@@ -229,7 +294,7 @@ class ApostarCog(commands.Cog):
         config_apostas = {
             "facil": (90, 1.1),
             "normal": (50, 2.0),
-            "arriscado": (5, 20.0)
+            "arriscado": (10, 10.0) 
         }
         prob, mult = config_apostas[dificuldade.value]
 
