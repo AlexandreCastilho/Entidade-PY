@@ -67,20 +67,16 @@ async def verificar_magnata(bot, interaction: discord.Interaction):
     
     # 3. Se o dono do cargo mudou, fazemos a troca
     if not membro_com_cargo or membro_com_cargo.id != id_lider_atual:
-        # Remover de quem tinha
         if membro_com_cargo:
             try: 
                 await membro_com_cargo.remove_roles(cargo, reason="Perdeu o posto de Magnata.")
             except: 
                 pass
 
-        # Adicionar ao novo líder
         novo_lider = interaction.guild.get_member(id_lider_atual)
         if novo_lider:
             try:
                 await novo_lider.add_roles(cargo, reason="Novo líder do Banco Cósmico.")
-                
-                # Anúncio Dourado
                 embed_magnata = discord.Embed(
                     title="👑 NOVO MAGNATA NO TRONO!",
                     description=f"Curvem-se! {novo_lider.mention} agora detém a maior fortuna bancária da União Cósmica e assumiu o manto de Magnata.",
@@ -99,7 +95,6 @@ async def verificar_rei_dos_ladroes(bot, interaction: discord.Interaction):
 
     # 1. Busca o ID do atual líder em roubos
     lider_db = await bot.db.fetchrow('SELECT id FROM users ORDER BY total_roubado DESC LIMIT 1')
-    # Se o banco retornar vazio ou o recorde for 0/nulo, não faz nada
     if not lider_db or not lider_db['id']:
         return
     
@@ -113,20 +108,16 @@ async def verificar_rei_dos_ladroes(bot, interaction: discord.Interaction):
     
     # 3. Se o dono do cargo mudou, fazemos a troca
     if not membro_com_cargo or membro_com_cargo.id != id_lider_atual:
-        # Remover de quem tinha
         if membro_com_cargo:
             try: 
                 await membro_com_cargo.remove_roles(cargo, reason="Perdeu o posto de Maior Ladrão.")
             except: 
                 pass
 
-        # Adicionar ao novo líder
         novo_lider = interaction.guild.get_member(id_lider_atual)
         if novo_lider:
             try:
                 await novo_lider.add_roles(cargo, reason="Tornou-se a maior ameaça do submundo.")
-                
-                # Anúncio Sombrio
                 embed_ladrao = discord.Embed(
                     title="🦹 NOVO REI DO SUBMUNDO!",
                     description=f"Tranquem seus cofres! {novo_lider.mention} acumulou a maior fortuna ilícita da Entidade e assumiu o controle do submundo.",
@@ -182,6 +173,22 @@ async def executar_roubo(bot, interaction: discord.Interaction, alvo_id: int, mo
     if interaction.user.id == alvo_id:
         return await interaction.response.send_message(embed=criar_embed_erro(interaction.user, "❌ Você não pode roubar a si mesmo. Tente algo menos autodestrutivo."))
 
+    # ==========================================
+    # NOVO: VERIFICAÇÃO DO ESCUDO DE CHAT
+    # ==========================================
+    if hasattr(bot, 'escudos_chat') and alvo_id in bot.escudos_chat:
+        agora = datetime.datetime.now(datetime.timezone.utc)
+        vencimento_escudo = bot.escudos_chat[alvo_id]
+        if agora < vencimento_escudo:
+            tempo_restante = int(vencimento_escudo.timestamp())
+            embed_escudo = criar_embed_erro(
+                interaction.user, 
+                f"❌ Acesso Negado! <@{alvo_id}> está ativamente conversando no servidor e não pode ser furtado no momento.\n\n"
+                f"A guarda dele só baixará <t:{tempo_restante}:R>, a não ser que ele envie outra mensagem."
+            )
+            return await interaction.response.send_message(embed=embed_escudo, ephemeral=True)
+
+
     if not hasattr(bot, 'roubos_ativos'):
         bot.roubos_ativos = set()
 
@@ -228,7 +235,6 @@ async def executar_roubo(bot, interaction: discord.Interaction, alvo_id: int, mo
             total_roubado = COALESCE(users.total_roubado, 0) + EXCLUDED.total_roubado
         ''', interaction.user.id, ganho_ladrao, ganho_ladrao)
 
-        # >>>> CHAMA A VERIFICAÇÃO DO MAIOR LADRÃO AQUI <<<<
         await verificar_rei_dos_ladroes(bot, interaction)
 
         texto_crime = (
@@ -249,7 +255,7 @@ async def executar_roubo(bot, interaction: discord.Interaction, alvo_id: int, mo
         bot.roubos_ativos.discard(interaction.user.id)
 
 # ==========================================
-# 2. MODAL DE TRANSAÇÃO (Fallback visual)
+# 2. MODAL DE TRANSAÇÃO E VIEWS
 # ==========================================
 class ModalTransferir(discord.ui.Modal):
     def __init__(self, bot, acao, moeda_nome, moeda_emoji):
@@ -271,9 +277,6 @@ class ModalTransferir(discord.ui.Modal):
     async def on_submit(self, interaction: discord.Interaction):
         await processar_transacao_direta(self.bot, interaction, self.acao, self.input_valor.value, self.moeda_nome, self.moeda_emoji)
 
-# ==========================================
-# 3. OS BOTÕES (View)
-# ==========================================
 class ViewSaldo(discord.ui.View):
     def __init__(self, bot, dono_id, moeda_nome, moeda_emoji):
         super().__init__(timeout=60) 
@@ -319,10 +322,7 @@ class ViewSaldo(discord.ui.View):
 
     @discord.ui.button(label="Informações", style=discord.ButtonStyle.primary, emoji="ℹ️")
     async def btn_info(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # 1. Busca os dados de farm do usuário
         reg_user = await self.bot.db.fetchrow('SELECT tempo_voz_diario, data_ultimo_farm_voz FROM users WHERE id = $1', interaction.user.id)
-        
-        # 2. Calcula se a data bate com o ciclo de farm atual (após as 06:00 BRT)
         agora_utc = datetime.datetime.now(datetime.timezone.utc)
         data_farm_hoje = (agora_utc - datetime.timedelta(hours=9)).date()
         
@@ -330,7 +330,6 @@ class ViewSaldo(discord.ui.View):
         if reg_user and reg_user['data_ultimo_farm_voz'] == data_farm_hoje:
             minutos_acumulados = reg_user['tempo_voz_diario'] or 0
 
-        # Monta a descrição atualizada
         descricao = (
             f"**🎙️ Farm em Canais de Voz:**\n"
             f"⏱️ **Progresso de Hoje:** Você já acumulou **{minutos_acumulados}/360 minutos** em chamadas.\n\n"
@@ -344,7 +343,8 @@ class ViewSaldo(discord.ui.View):
             
             f"**💬 Farm no Chat:**\n"
             f"• **100 {self.moeda_nome}** por mensagem válida.\n"
-            f"• Há um intervalo de descanso (cooldown) de **5 minutos** entre cada ganho.\n\n"
+            f"• Há um intervalo de descanso (cooldown) de **5 minutos** entre cada ganho.\n"
+            f"🛡️ **Proteção de Conversa:** Enviar mensagens garante um escudo de 5 minutos contra roubos!\n\n"
             
             f"🚀 **Boosters:**\n"
             f"Ter um Booster ativo **dobra (x2)** todos os valores acima!"
@@ -386,6 +386,16 @@ class EconomiaCog(commands.Cog):
     def moeda_emoji(self):
         emoji = discord.utils.get(self.bot.emojis, name="UCreditos")
         return emoji if emoji else "💎"
+
+    # ==========================================
+    # NOVO: LISTENER QUE QUEBRA O ESCUDO
+    # ==========================================
+    @commands.Cog.listener()
+    async def on_app_command_completion(self, interaction: discord.Interaction, command: discord.app_commands.Command):
+        """Ouve todas as execuções de comandos globais e remove o escudo do chat."""
+        # Removemos apenas se o dicionário existir e o autor estiver nele
+        if hasattr(self.bot, 'escudos_chat'):
+            self.bot.escudos_chat.pop(interaction.user.id, None)
 
     async def renderizar_saldo(self, interaction: discord.Interaction, alvo: discord.Member):
         embed = await gerar_embed_saldo(self.bot, alvo, self.moeda_nome, self.moeda_emoji)

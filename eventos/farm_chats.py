@@ -2,10 +2,17 @@ import discord
 from discord.ext import commands
 import datetime
 
+# ID do canal onde o escudo é quebrado (ex: canal de cassino/jogos)
+CANAL_PERIGO_ID = 1000948732235362325
+
 class FarmChatCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         
+        # Inicializa o dicionário de escudos na memória do bot (se não existir)
+        if not hasattr(self.bot, 'escudos_chat'):
+            self.bot.escudos_chat = {}
+            
         # Cria um mapeamento de cooldown: 1 recompensa a cada 300 segundos (5 minutos) por USUÁRIO
         self.cooldown = commands.CooldownMapping.from_cooldown(1, 300.0, commands.BucketType.user)
 
@@ -19,14 +26,24 @@ class FarmChatCog(commands.Cog):
         if message.content.startswith('/'):
             return
 
-        # 3. Verifica o Cooldown
+        agora = datetime.datetime.now(datetime.timezone.utc)
+
+        # 3. ATUALIZA (OU QUEBRA) O ESCUDO DE CHAT
+        if message.channel.id == CANAL_PERIGO_ID:
+            # Se mandar mensagem neste canal, perde o escudo na hora
+            self.bot.escudos_chat.pop(message.author.id, None)
+        else:
+            # Qualquer outro chat renova o escudo de imunidade para +5 minutos
+            self.bot.escudos_chat[message.author.id] = agora + datetime.timedelta(minutes=5)
+
+        # 4. Verifica o Cooldown para a recompensa financeira
         bucket = self.cooldown.get_bucket(message)
         retry_after = bucket.update_rate_limit()
 
         if retry_after:
             return
 
-        # 4. Lógica de Recompensa e Booster
+        # 5. Lógica de Recompensa e Booster
         try:
             ganho = 100 # O novo ganho padrão por mensagem
             
@@ -34,12 +51,11 @@ class FarmChatCog(commands.Cog):
             reg_user = await self.bot.db.fetchrow('SELECT booster_ate FROM users WHERE id = $1', message.author.id)
             
             if reg_user and reg_user['booster_ate']:
-                agora = datetime.datetime.now(datetime.timezone.utc)
                 # Se a data de validade for maior que o momento atual, o booster está ativo!
                 if reg_user['booster_ate'] > agora:
                     ganho *= 2 # Multiplica o ganho por 2 (ficando 200 UCréditos)
 
-            # 5. Adiciona o UCrédito na Carteira de forma silenciosa
+            # 6. Adiciona o UCrédito na Carteira de forma silenciosa
             await self.bot.db.execute(
                 '''INSERT INTO users (id, carteira) VALUES ($1, $2)
                    ON CONFLICT (id) DO UPDATE SET carteira = users.carteira + EXCLUDED.carteira''',
