@@ -10,28 +10,31 @@ async def gerar_embed_rank(bot, usuario_id: int, tipo: str, moeda_emoji: str):
     
     if tipo == "banco":
         coluna = "banco"
+        filtro = f"{coluna} > 0"
         titulo = "🏆 Rank de Riqueza - Banco Cósmico"
         cor = discord.Color.gold()
         vazio_msg = "Os cofres do Sistema Origem estão vazios no momento."
         footer_prefix = "Saldo no Banco"
     elif tipo == "roubo":
         coluna = "total_roubado"
+        filtro = f"{coluna} > 0"
         titulo = "🦹 Rank do Submundo - Maiores Ladrões"
         cor = discord.Color.dark_red()
         vazio_msg = "Nenhum crime registrado no sistema ainda."
         footer_prefix = "Total Roubado"
     else: # aposta
         coluna = "balanco_apostas"
+        filtro = f"{coluna} IS NOT NULL AND {coluna} != 0" # Inclui negativos, exclui quem zerou exato
         titulo = "🎲 Rank do Cassino - Maiores Apostadores"
         cor = discord.Color.green()
-        vazio_msg = "Ninguém lucrou nas mesas de aposta da Entidade ainda."
-        footer_prefix = "Lucro nas Apostas"
+        vazio_msg = "Ninguém lucrou ou perdeu nas mesas de aposta da Entidade ainda."
+        footer_prefix = "Lucro/Prejuízo nas Apostas"
 
     # 1. Busca o Top 10
     query_top10 = f'''
         SELECT id, {coluna} as valor 
         FROM users 
-        WHERE {coluna} > 0 
+        WHERE {filtro} 
         ORDER BY {coluna} DESC 
         LIMIT 10
     '''
@@ -45,7 +48,7 @@ async def gerar_embed_rank(bot, usuario_id: int, tipo: str, moeda_emoji: str):
         SELECT position, valor FROM (
             SELECT id, {coluna} as valor, ROW_NUMBER() OVER (ORDER BY {coluna} DESC) as position
             FROM users
-            WHERE {coluna} > 0
+            WHERE {filtro}
         ) AS ranked
         WHERE id = $1
     '''
@@ -58,7 +61,11 @@ async def gerar_embed_rank(bot, usuario_id: int, tipo: str, moeda_emoji: str):
     for i, reg in enumerate(top_10):
         user_id = reg['id']
         valor = reg['valor']
-        valor_fmt = f"{valor:,}".replace(',', '.')
+        
+        # Formatação para lidar com números negativos de forma elegante
+        sinal = "-" if valor < 0 else ""
+        valor_absoluto = abs(valor)
+        valor_fmt = f"{sinal}{valor_absoluto:,}".replace(',', '.')
         
         # Destaca o autor se ele estiver no Top 10
         if user_id == usuario_id:
@@ -76,10 +83,12 @@ async def gerar_embed_rank(bot, usuario_id: int, tipo: str, moeda_emoji: str):
     # 5. Informação da posição pessoal no rodapé
     if posicao_autor_data:
         pos = posicao_autor_data['position']
-        meu_valor = f"{posicao_autor_data['valor']:,}".replace(',', '.')
+        valor_pessoal = posicao_autor_data['valor']
+        sinal_meu = "-" if valor_pessoal < 0 else ""
+        meu_valor = f"{sinal_meu}{abs(valor_pessoal):,}".replace(',', '.')
         embed.set_footer(text=f"Sua Posição: #{pos} | {footer_prefix}: {meu_valor} UCréditos")
     else:
-        embed.set_footer(text="Você ainda não possui registros positivos neste rank.")
+        embed.set_footer(text="Você ainda não possui registros neste rank.")
 
     embed.set_thumbnail(url="https://i.imgur.com/B3rbj9k.png")
     

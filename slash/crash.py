@@ -12,9 +12,9 @@ CARGO_APOSTADOR_ID = 1500145598794563816
 # ==========================================
 # ⚙️ CONFIGURAÇÕES DO FOGUETINHO
 # ==========================================
-RTP_CRASH = 0.99         # 99% de Retorno (1% da casa)
+RTP_CRASH = 0.98         # 98% de Retorno (8% da casa)
 MAX_MULTIPLICADOR = 100.00 # Limite de 100x
-TAXA_CRESCIMENTO = 0.08  # Controla a velocidade do foguete (maior = mais rápido)
+TAXA_CRESCIMENTO = 0.04  # Controla a velocidade do foguete (maior = mais rápido)
 
 # ==========================================
 # FUNÇÕES DE BANCO DE DADOS E LÓGICA
@@ -289,6 +289,8 @@ class CrashCog(commands.Cog):
                 "2️⃣ O foguete decola e o multiplicador começa a subir rapidamente.\n"
                 "3️⃣ Você deve clicar no botão verde **RETIRAR** antes que o foguete exploda!\n"
                 "4️⃣ Se retirar a tempo, ganha sua aposta vezes o multiplicador atual. Se explodir antes, você perde tudo.\n\n"
+                
+                "**Atenção:** Ao iniciar o jogo, todo o seu saldo da carteira será transferido para o banco para sua segurança.\n\n"
                 "*Aperte o botão abaixo quando estiver pronto para o lançamento.*"
             ),
             color=discord.Color.blurple()

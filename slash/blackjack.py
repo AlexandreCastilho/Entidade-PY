@@ -11,7 +11,7 @@ CARGO_APOSTADOR_ID = 1500145598794563816
 # ==========================================
 # ⚙️ CONFIGURAÇÕES DE MONEY SINK (AJUSTE AQUI)
 # ==========================================
-TAXA_CASSINO = 0.05         # 0.05 = 5% do LUCRO retido pela casa. (0.0 = sem taxa).
+TAXA_CASSINO = 0.00         # 0.05 = 5% do LUCRO retido pela casa. (0.0 = sem taxa).
 PAGAMENTO_BJ = 1.5          # Padrão é 1.5 (Paga 3:2). Mude para 1.0 (Paga 1:1) para secar o dinheiro.
 CASA_VENCE_EMPATE = False   # Se True, em caso de empate (ex: 18 a 18), o jogador PERDE o dinheiro.
 
@@ -191,8 +191,10 @@ class BlackjackView(discord.ui.View):
         pts_jogador = calcular_mao(self.mao_jogador)
         pts_dealer = calcular_mao(self.mao_dealer)
 
-        # Dealer sempre compra até ter 17 ou mais
-        while pts_dealer < 17:
+        # NOVA LÓGICA DO DEALER:
+        # Ele compra enquanto tiver menos de 17, 
+        # OU enquanto estiver perdendo para o jogador e ainda não tiver estourado (<= 21).
+        while pts_dealer < 17 or (pts_dealer < pts_jogador and pts_dealer < 21):
             self.mao_dealer.append(self.baralho.pop())
             pts_dealer = calcular_mao(self.mao_dealer)
 

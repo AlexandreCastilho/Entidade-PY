@@ -129,6 +129,19 @@ async def verificar_rei_dos_ladroes(bot, interaction: discord.Interaction):
 
 async def processar_transacao_direta(bot, interaction: discord.Interaction, acao: str, valor_str: str, moeda_nome: str, moeda_emoji: str):
     """Motor central que processa os depósitos e saques para evitar código repetido."""
+    
+    # ==========================================
+    # CORREÇÃO DO EXPLOIT: Checagem movida para o backend
+    # ==========================================
+    if acao == 'depositar':
+        if hasattr(bot, 'cooldown_deposito') and interaction.user.id in bot.cooldown_deposito:
+            vencimento = bot.cooldown_deposito[interaction.user.id]
+            agora = datetime.datetime.now(datetime.timezone.utc)
+            if agora < vencimento:
+                tempo_restante = int((vencimento - agora).total_seconds())
+                msg_policia = f"🚨 **A polícia está na sua cola!**\nVocê acabou de cometer um roubo. Aguarde **{tempo_restante} segundos** para despistar as autoridades antes de poder depositar seu dinheiro sujo no banco."
+                return await interaction.response.send_message(embed=criar_embed_erro(interaction.user, msg_policia), ephemeral=True)
+
     registro = await bot.db.fetchrow('SELECT carteira, banco FROM users WHERE id = $1', interaction.user.id)
     carteira = registro['carteira'] if registro else 0
     banco = registro['banco'] if registro else 0
@@ -173,9 +186,7 @@ async def executar_roubo(bot, interaction: discord.Interaction, alvo_id: int, mo
     if interaction.user.id == alvo_id:
         return await interaction.response.send_message(embed=criar_embed_erro(interaction.user, "❌ Você não pode roubar a si mesmo. Tente algo menos autodestrutivo."))
 
-    # ==========================================
-    # NOVO: VERIFICAÇÃO DO ESCUDO DE CHAT
-    # ==========================================
+    # Verificação do Escudo de Chat
     if hasattr(bot, 'escudos_chat') and alvo_id in bot.escudos_chat:
         agora = datetime.datetime.now(datetime.timezone.utc)
         vencimento_escudo = bot.escudos_chat[alvo_id]
@@ -187,7 +198,6 @@ async def executar_roubo(bot, interaction: discord.Interaction, alvo_id: int, mo
                 f"A guarda dele só baixará <t:{tempo_restante}:R>, a não ser que ele envie outra mensagem."
             )
             return await interaction.response.send_message(embed=embed_escudo, ephemeral=True)
-
 
     if not hasattr(bot, 'roubos_ativos'):
         bot.roubos_ativos = set()
@@ -298,15 +308,8 @@ class ViewSaldo(discord.ui.View):
     async def btn_depositar(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.dono_id:
             return await interaction.response.send_message(embed=criar_embed_erro(interaction.user, "❌ Você não pode gerenciar o dinheiro alheio."))
-            
-        if hasattr(self.bot, 'cooldown_deposito') and interaction.user.id in self.bot.cooldown_deposito:
-            vencimento = self.bot.cooldown_deposito[interaction.user.id]
-            agora = datetime.datetime.now(datetime.timezone.utc)
-            if agora < vencimento:
-                tempo_restante = int((vencimento - agora).total_seconds())
-                msg_policia = f"🚨 **A polícia está na sua cola!**\nVocê acabou de cometer um roubo. Aguarde **{tempo_restante} segundos** para despistar as autoridades antes de poder depositar seu dinheiro sujo no banco."
-                return await interaction.response.send_message(embed=criar_embed_erro(interaction.user, msg_policia))
-
+        
+        # O Modal agora abre livremente, mas o backend bloqueia na hora de enviar!
         await interaction.response.send_modal(ModalTransferir(self.bot, 'depositar', self.moeda_nome, self.moeda_emoji))
 
     @discord.ui.button(label="Sacar", style=discord.ButtonStyle.secondary, emoji="📤")
@@ -387,13 +390,9 @@ class EconomiaCog(commands.Cog):
         emoji = discord.utils.get(self.bot.emojis, name="UCreditos")
         return emoji if emoji else "💎"
 
-    # ==========================================
-    # NOVO: LISTENER QUE QUEBRA O ESCUDO
-    # ==========================================
     @commands.Cog.listener()
     async def on_app_command_completion(self, interaction: discord.Interaction, command: discord.app_commands.Command):
         """Ouve todas as execuções de comandos globais e remove o escudo do chat."""
-        # Removemos apenas se o dicionário existir e o autor estiver nele
         if hasattr(self.bot, 'escudos_chat'):
             self.bot.escudos_chat.pop(interaction.user.id, None)
 
@@ -416,22 +415,13 @@ class EconomiaCog(commands.Cog):
     @app_commands.command(name="depositar", description="Guarde seus UCréditos em segurança no banco.")
     @app_commands.describe(valor="A quantia (número). Deixe vazio para depositar TUDO.")
     async def cmd_depositar(self, interaction: discord.Interaction, valor: str = None):
-        if hasattr(self.bot, 'cooldown_deposito') and interaction.user.id in self.bot.cooldown_deposito:
-            vencimento = self.bot.cooldown_deposito[interaction.user.id]
-            agora = datetime.datetime.now(datetime.timezone.utc)
-            if agora < vencimento:
-                tempo_restante = int((vencimento - agora).total_seconds())
-                msg_policia = f"🚨 **A polícia está na sua cola!**\nAguarde **{tempo_restante} segundos** antes de poder depositar seu dinheiro sujo no banco."
-                return await interaction.response.send_message(embed=criar_embed_erro(interaction.user, msg_policia))
-
-        # Aceita a omissão e preenche como "tudo"
+        # A checagem foi removida daqui também, pois o processar_transacao_direta já cuida disso!
         valor_final = valor if valor else 'tudo'
         await processar_transacao_direta(self.bot, interaction, 'depositar', valor_final, self.moeda_nome, self.moeda_emoji)
 
     @app_commands.command(name="sacar", description="Retire seus UCréditos do banco para a carteira.")
     @app_commands.describe(valor="A quantia (número) ou escreva 'tudo'.")
     async def cmd_sacar(self, interaction: discord.Interaction, valor: str):
-        # Obriga o preenchimento de 'valor' para evitar acidentes.
         await processar_transacao_direta(self.bot, interaction, 'sacar', valor, self.moeda_nome, self.moeda_emoji)
 
     @app_commands.command(name="roubar", description="Tente a sorte roubando a carteira de outro Tenno.")
