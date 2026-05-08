@@ -230,7 +230,7 @@ async def executar_roubo(bot, interaction: discord.Interaction, alvo_id: int, mo
             view.mensagem_original = msg
             return
 
-        valor_extraido = math.ceil(v_carteira * 0.80)
+        valor_extraido = math.ceil(v_carteira * 0.50)
         perda_no_vacuo = math.ceil(valor_extraido * 0.20)
         ganho_ladrao = valor_extraido - perda_no_vacuo
 

@@ -55,11 +55,16 @@ class FarmChatCog(commands.Cog):
                 if reg_user['booster_ate'] > agora:
                     ganho *= 2 # Multiplica o ganho por 2 (ficando 200 UCréditos)
 
-            # 6. Adiciona o UCrédito na Carteira de forma silenciosa
+            # 6. Divide o ganho 50/50 entre carteira e banco e adiciona de forma silenciosa
+            ganho_banco = ganho // 2
+            ganho_carteira = ganho - ganho_banco
+
             await self.bot.db.execute(
-                '''INSERT INTO users (id, carteira) VALUES ($1, $2)
-                   ON CONFLICT (id) DO UPDATE SET carteira = users.carteira + EXCLUDED.carteira''',
-                message.author.id, ganho
+                '''INSERT INTO users (id, carteira, banco) VALUES ($1, $2, $3)
+                   ON CONFLICT (id) DO UPDATE SET 
+                   carteira = COALESCE(users.carteira, 0) + EXCLUDED.carteira,
+                   banco = COALESCE(users.banco, 0) + EXCLUDED.banco''',
+                message.author.id, ganho_carteira, ganho_banco
             )
         except Exception as e:
             print(f"❌ Erro ao entregar UCrédito por chat para {message.author.name}: {e}")

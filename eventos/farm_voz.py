@@ -92,6 +92,11 @@ class FarmVozCog(commands.Cog):
                 tempo_entrada = self.sessoes_voz.pop(member.id)
                 agora = datetime.datetime.now(datetime.timezone.utc)
                 
+                # CONCEDE 10 MINUTOS DE ESCUDO APÓS SAIR DA CALL
+                if not hasattr(self.bot, 'escudos_chat'):
+                    self.bot.escudos_chat = {}
+                self.bot.escudos_chat[member.id] = agora + datetime.timedelta(minutes=10)
+
                 duracao_real_minutos = int((agora - tempo_entrada).total_seconds() // 60)
                 print(f"📤 [VOZ-SAÍDA] {member.display_name} desconectou (ou foi pro AFK). Duração da call: {duracao_real_minutos} minutos. Calculando ganhos...")
 
@@ -135,17 +140,21 @@ class FarmVozCog(commands.Cog):
                     ganho_final = ganho_base_total * 2 if booster_ativo else ganho_base_total
 
                     if ganho_final > 0:
-                        # SALVA TUDO NO BANCO (Apenas os minutos da 'Parte 2' ou sessão normal vão pro novo dia)
+                        # DIVIDE O GANHO 50/50 ENTRE CARTEIRA E BANCO
+                        ganho_banco = ganho_final // 2
+                        ganho_carteira = ganho_final - ganho_banco
+
                         await self.bot.db.execute(
-                            '''INSERT INTO users (id, carteira, tempo_voz_diario, data_ultimo_farm_voz) 
-                               VALUES ($1, $2, $3, $4)
+                            '''INSERT INTO users (id, carteira, banco, tempo_voz_diario, data_ultimo_farm_voz) 
+                               VALUES ($1, $2, $3, $4, $5)
                                ON CONFLICT (id) DO UPDATE SET 
-                               carteira = users.carteira + EXCLUDED.carteira,
+                               carteira = COALESCE(users.carteira, 0) + EXCLUDED.carteira,
+                               banco = COALESCE(users.banco, 0) + EXCLUDED.banco,
                                tempo_voz_diario = EXCLUDED.tempo_voz_diario,
                                data_ultimo_farm_voz = EXCLUDED.data_ultimo_farm_voz''',
-                            member.id, ganho_final, novos_minutos_diarios, data_farm_hoje
+                            member.id, ganho_carteira, ganho_banco, novos_minutos_diarios, data_farm_hoje
                         )
-                        print(f"💰 [VOZ-PAGAMENTO] Sucesso! Depositado {ganho_final} UCréditos para {member.display_name}. (Tempo acumulado no dia de hoje: {novos_minutos_diarios}/{360} min)")
+                        print(f"💰 [VOZ-PAGAMENTO] Sucesso! {ganho_final} UCréditos farmados por {member.display_name} ({ganho_carteira} para carteira, {ganho_banco} para banco). (Tempo no dia: {novos_minutos_diarios}/{360} min)")
                     else:
                         print(f"⚠️ [VOZ-ZERADO] {member.display_name} não recebeu nada. (Motivo: Tempo menor que 1 minuto OU limite diário de 6 horas já esgotado).")
                         
