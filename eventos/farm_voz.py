@@ -6,7 +6,8 @@ import math
 class FarmVozCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.sessoes_voz = {}
+        if not hasattr(self.bot, 'sessoes_voz'):
+            self.bot.sessoes_voz = {}
 
     def obter_data_farm(self, momento: datetime.datetime):
         """Calcula o 'Dia de Farm'. O dia só vira às 06:00 BRT (09:00 UTC)."""
@@ -64,8 +65,8 @@ class FarmVozCog(commands.Cog):
             for canal_voz in guild.voice_channels:
                 if canal_voz.id in canais_ignorados: continue
                 for membro in canal_voz.members:
-                    if not membro.bot and membro.id not in self.sessoes_voz:
-                        self.sessoes_voz[membro.id] = agora
+                    if not membro.bot and membro.id not in self.bot.sessoes_voz:
+                        self.bot.sessoes_voz[membro.id] = agora
                         print(f"🎙️ [VOZ-INIT] {membro.display_name} já estava no canal '{canal_voz.name}'. Cronômetro iniciado de carona.")
 
     # ==========================================
@@ -83,13 +84,13 @@ class FarmVozCog(commands.Cog):
 
         if not estava_valido and esta_valido:
             # ENTRADA
-            self.sessoes_voz[member.id] = datetime.datetime.now(datetime.timezone.utc)
+            self.bot.sessoes_voz[member.id] = datetime.datetime.now(datetime.timezone.utc)
             print(f"📥 [VOZ-ENTRADA] {member.display_name} entrou em um canal válido ({after.channel.name}). Iniciando contagem.")
 
         elif estava_valido and not esta_valido:
             # SAÍDA
-            if member.id in self.sessoes_voz:
-                tempo_entrada = self.sessoes_voz.pop(member.id)
+            if member.id in self.bot.sessoes_voz:
+                tempo_entrada = self.bot.sessoes_voz.pop(member.id)
                 agora = datetime.datetime.now(datetime.timezone.utc)
                 
                 # CONCEDE 10 MINUTOS DE ESCUDO APÓS SAIR DA CALL

@@ -30,7 +30,7 @@ class SeletorCanalExame(discord.ui.ChannelSelect):
 
         await interaction.response.send_message(
             f"📢 **Configuração Atualizada:** O canal de exames agora é {canal_selecionado.mention}.", 
-            ephemeral=False
+            ephemeral=True
         )
 
 class SeletorCargoSilenciado(discord.ui.RoleSelect):
@@ -58,7 +58,7 @@ class SeletorCargoSilenciado(discord.ui.RoleSelect):
 
         await interaction.response.send_message(
             f"📢 **Configuração Atualizada:** O cargo de silenciamento agora é {cargo_selecionado.mention}.", 
-            ephemeral=False
+            ephemeral=True
         )
 
 class SeletorCanalDenuncia(discord.ui.ChannelSelect):
@@ -84,7 +84,7 @@ class SeletorCanalDenuncia(discord.ui.ChannelSelect):
 
         await interaction.response.send_message(
             f"✅ Canal de denúncias definido para: {canal_selecionado.mention}", 
-            ephemeral=False
+            ephemeral=True
         )
 
 class SeletorCanalAutoMod(discord.ui.ChannelSelect):
@@ -110,7 +110,7 @@ class SeletorCanalAutoMod(discord.ui.ChannelSelect):
 
         await interaction.response.send_message(
             f"📢 **Configuração Atualizada:** O canal de auto moderação agora é {canal_selecionado.mention}.", 
-            ephemeral=False
+            ephemeral=True
         )
 
 class SeletorCanalRegistroPunicoes(discord.ui.ChannelSelect):
@@ -136,7 +136,7 @@ class SeletorCanalRegistroPunicoes(discord.ui.ChannelSelect):
 
         await interaction.response.send_message(
             f"📢 **Configuração Atualizada:** O canal de registro de punições agora é {canal_selecionado.mention}.", 
-            ephemeral=False
+            ephemeral=True
         )
 
 class SeletorCanaisIgnoradosVoz(discord.ui.ChannelSelect):
@@ -163,9 +163,9 @@ class SeletorCanaisIgnoradosVoz(discord.ui.ChannelSelect):
         interaction.client.cache_canais_ignorados_voz[guild_id] = canais_selecionados
 
         if canais_selecionados:
-            await interaction.response.send_message(f"✅ Zonas mortas configuradas! O farm foi bloqueado em {len(canais_selecionados)} canal(is) de voz.", ephemeral=False)
+            await interaction.response.send_message(f"✅ Zonas mortas configuradas! O farm foi bloqueado em {len(canais_selecionados)} canal(is) de voz.", ephemeral=True)
         else:
-            await interaction.response.send_message("✅ Defesas removidas. Todos os canais de voz agora geram UCréditos normalmente.", ephemeral=False)
+            await interaction.response.send_message("✅ Defesas removidas. Todos os canais de voz agora geram UCréditos normalmente.", ephemeral=True)
 
 # --- NOVO: SELETOR DE CARGOS ADMINISTRATIVOS ---
 class SeletorCargosAdministrativos(discord.ui.RoleSelect):
@@ -194,9 +194,9 @@ class SeletorCargosAdministrativos(discord.ui.RoleSelect):
         interaction.client.cache_cargos_admin[guild_id] = cargos_selecionados
 
         if cargos_selecionados:
-            await interaction.response.send_message(f"✅ Auto-Role configurado! Os {len(cargos_selecionados)} cargos selecionados agora atribuirão a tag 'Administração'.", ephemeral=False)
+            await interaction.response.send_message(f"✅ Auto-Role configurado! Os {len(cargos_selecionados)} cargos selecionados agora atribuirão a tag 'Administração'.", ephemeral=True)
         else:
-            await interaction.response.send_message("✅ Sistema de Auto-Role desativado (Nenhum cargo selecionado).", ephemeral=False)
+            await interaction.response.send_message("✅ Sistema de Auto-Role desativado (Nenhum cargo selecionado).", ephemeral=True)
 
 # ==========================================
 # 2. O BOTÃO DE ATUALIZAÇÃO
@@ -257,6 +257,22 @@ class BotaoRecarregar(discord.ui.Button):
                 ephemeral=True
             )
 
+class BotaoSyncSimples(discord.ui.Button):
+    def __init__(self, bot):
+        super().__init__(label="Sincronizar Comandos", style=discord.ButtonStyle.primary, emoji="📡")
+        self.bot = bot
+
+    async def callback(self, interaction: discord.Interaction):
+        if not interaction.permissions.administrator:
+            return await interaction.response.send_message("❌ Apenas administradores podem fazer isso.", ephemeral=True)
+        await interaction.response.defer(ephemeral=True)
+        try:
+            self.bot.tree.copy_global_to(guild=interaction.guild)
+            fmt = await self.bot.tree.sync(guild=interaction.guild)
+            await interaction.followup.send(f"✅ Sincronização rápida concluída! **{len(fmt)} comandos** atualizados na interface do Discord.", ephemeral=True)
+        except Exception as e:
+            await interaction.followup.send(f"⚠️ Erro ao sincronizar comandos: {e}", ephemeral=True)
+
 
 # ==========================================
 # 3. O LAYOUT VISUAL
@@ -290,8 +306,8 @@ class ConfiguracoesLayout(discord.ui.LayoutView):
         container.add_item(discord.ui.ActionRow(SeletorCargosAdministrativos()))
 
         # --- SEÇÃO DE FERRAMENTAS DO DEV ---
-        container.add_item(discord.ui.TextDisplay(content="## 🛠️ Ferramentas de Desenvolvedor\nUse este botão sempre que alterar ou criar novos comandos no código-fonte."))
-        container.add_item(discord.ui.ActionRow(BotaoRecarregar(bot)))
+        container.add_item(discord.ui.TextDisplay(content="## 🛠️ Ferramentas de Desenvolvedor\nUse 'Recarregar' se alterou a lógica do código. Use 'Sincronizar' apenas se mudou os comandos de barra (slash)."))
+        container.add_item(discord.ui.ActionRow(BotaoRecarregar(bot), BotaoSyncSimples(bot)))
 
         container.add_item(discord.ui.TextDisplay(content="*Este menu só será funcional por 3 minutos.\nApós isso, use-o novamente.*"))
 
@@ -308,7 +324,7 @@ class Configuracoes(commands.Cog):
     @app_commands.command(name="configurações", description="Configura os canais e painéis de controle do servidor.")
     @app_commands.default_permissions(administrator=True)
     async def config_cmd(self, interaction: discord.Interaction):
-        await interaction.response.send_message(view=ConfiguracoesLayout(self.bot), ephemeral=False)
+        await interaction.response.send_message(view=ConfiguracoesLayout(self.bot), ephemeral=True)
 
     # ----------------------------------------------------
     # OUVINTE: DETECTA QUANDO UM MEMBRO RECEBE/PERDE CARGOS
