@@ -21,6 +21,7 @@ class ModalValorTransferir(discord.ui.Modal, title='Valor da Transferência'):
         self.moeda_emoji = moeda_emoji
 
     async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         await processar_transferencia(self.bot, interaction, self.alvo, self.input_valor.value)
 
 # ==========================================
@@ -55,6 +56,9 @@ class TransferirView(discord.ui.View):
 # 3. LÓGICA DE PROCESSAMENTO (BANCO PARA BANCO)
 # ==========================================
 async def processar_transferencia(bot, interaction, alvo, valor_str):
+    foi_deferido = interaction.response.is_done()
+    enviar = interaction.followup.send if foi_deferido else interaction.response.send_message
+
     autor = interaction.user
     valor_str = str(valor_str).strip().lower()
 
@@ -69,13 +73,13 @@ async def processar_transferencia(bot, interaction, alvo, valor_str):
         try:
             valor = int(valor_str)
         except ValueError:
-            return await interaction.response.send_message("❌ Valor inválido. Use números inteiros ou 'tudo'.", ephemeral=True)
+            return await enviar("❌ Valor inválido. Use números inteiros ou 'tudo'.", ephemeral=True)
 
     if valor <= 0:
-        return await interaction.response.send_message("❌ A quantia deve ser maior que zero.", ephemeral=True)
+        return await enviar("❌ A quantia deve ser maior que zero.", ephemeral=True)
 
     if valor > saldo_remetente:
-        return await interaction.response.send_message(f"❌ Saldo bancário insuficiente. Você possui **{saldo_remetente:,}** no banco.".replace(',', '.'), ephemeral=True)
+        return await enviar(f"❌ Saldo bancário insuficiente. Você possui **{saldo_remetente:,}** no banco.".replace(',', '.'), ephemeral=True)
 
     # Executa a transação no Supabase
     try:
@@ -101,14 +105,10 @@ async def processar_transferencia(bot, interaction, alvo, valor_str):
             color=discord.Color.green()
         )
         
-        # Se for uma resposta a um componente (Select/Modal), usamos edit ou followup
-        if interaction.response.is_done():
-            await interaction.followup.send(embed=embed)
-        else:
-            await interaction.response.send_message(embed=embed)
+        await enviar(embed=embed)
 
     except Exception as e:
-        await interaction.response.send_message(f"❌ Erro na câmara de compensação: {e}", ephemeral=True)
+        await enviar(f"❌ Erro na câmara de compensação: {e}", ephemeral=True)
 
 # ==========================================
 # 4. O COMANDO SLASH E INTERAÇÕES

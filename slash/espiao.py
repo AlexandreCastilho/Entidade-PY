@@ -6,7 +6,7 @@ from discord.ext import commands
 # CONFIGURAÇÕES VISUAIS
 # ==========================================
 URL_IMAGEM = "https://mackjackandjill.com/wp-content/uploads/2014/09/privacy-creeper.jpg"
-PRECO_INFO = 3000
+PRECO_INFO = 500
 
 # ==========================================
 # VIEW DO BOTÃO DE COMPRA
@@ -24,7 +24,7 @@ class EspiaoView(discord.ui.View):
 
         if saldo_comprador < PRECO_INFO:
             embed_pobre = discord.Embed(
-                description=f"*Preciso de um incentivo de verdade. Que tal 3.000 UCreditos?*",
+                description=f"*Preciso de um incentivo de verdade. Que tal {PRECO_INFO} UCreditos?*",
                 color=discord.Color.light_grey()
             )
             embed_pobre.set_author(name="Figura Misteriosa", icon_url=URL_IMAGEM)

@@ -4,6 +4,7 @@ from discord import app_commands
 import math
 import datetime
 import asyncio
+import random
 
 # ==========================================
 # FUNÇÕES AUXILIARES DE EMBED E LÓGICA
@@ -127,20 +128,60 @@ async def verificar_rei_dos_ladroes(bot, interaction: discord.Interaction):
             except:
                 pass
 
+class ViewFalhaRoubo(discord.ui.View):
+    def __init__(self, bot, valor, ladrao, moeda_emoji):
+        super().__init__(timeout=300)
+        self.bot = bot
+        self.valor = valor
+        self.ladrao = ladrao
+        self.moeda_emoji = moeda_emoji
+        self.coletado = False
+        self.lock = asyncio.Lock()
+
+    @discord.ui.button(label="Pegar Dinheiro", style=discord.ButtonStyle.success, emoji="💸")
+    async def btn_pegar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        async with self.lock:
+            if self.coletado:
+                return await interaction.response.send_message("❌ Alguém foi mais rápido e já pegou o dinheiro!", ephemeral=True)
+            self.coletado = True
+            
+        await self.bot.db.execute('''
+            INSERT INTO users (id, carteira) VALUES ($1, $2)
+            ON CONFLICT (id) DO UPDATE SET carteira = users.carteira + EXCLUDED.carteira
+        ''', interaction.user.id, self.valor)
+
+        for child in self.children:
+            child.disabled = True
+        
+        # Atualiza a mensagem mostrando quem foi o sortudo
+        embed = interaction.message.embeds[0]
+        embed.color = discord.Color.dark_gray()
+        embed.add_field(name="💸 Dinheiro Coletado!", value=f"{interaction.user.mention} foi o mais rápido e catou os **{self.valor:,}** {self.moeda_emoji} do chão!".replace(',', '.'), inline=False)
+        
+        await interaction.response.edit_message(embed=embed, view=self)
+        await interaction.followup.send(f"🎉 Você pegou **{self.valor:,}** {self.moeda_emoji} que caíram de {self.ladrao.mention}!".replace(',', '.'), ephemeral=True)
+
+
 async def processar_transacao_direta(bot, interaction: discord.Interaction, acao: str, valor_str: str, moeda_nome: str, moeda_emoji: str):
     """Motor central que processa os depósitos e saques para evitar código repetido."""
     
+    foi_deferido = interaction.response.is_done()
+    enviar = interaction.followup.send if foi_deferido else interaction.response.send_message
+
     # ==========================================
     # CORREÇÃO DO EXPLOIT: Checagem movida para o backend
     # ==========================================
     if acao == 'depositar':
+        if hasattr(bot, 'roubos_ativos') and interaction.user.id in bot.roubos_ativos:
+            return await enviar(embed=criar_embed_erro(interaction.user, "❌ As suas mãos estão ocupadas tentando roubar alguém! Impossível depositar agora."), ephemeral=True)
+
         if hasattr(bot, 'cooldown_deposito') and interaction.user.id in bot.cooldown_deposito:
             vencimento = bot.cooldown_deposito[interaction.user.id]
             agora = datetime.datetime.now(datetime.timezone.utc)
             if agora < vencimento:
                 tempo_restante = int((vencimento - agora).total_seconds())
                 msg_policia = f"🚨 **A polícia está na sua cola!**\nVocê acabou de cometer um roubo. Aguarde **{tempo_restante} segundos** para despistar as autoridades antes de poder depositar seu dinheiro sujo no banco."
-                return await interaction.response.send_message(embed=criar_embed_erro(interaction.user, msg_policia), ephemeral=True)
+                return await enviar(embed=criar_embed_erro(interaction.user, msg_policia), ephemeral=True)
 
     registro = await bot.db.fetchrow('SELECT carteira, banco FROM users WHERE id = $1', interaction.user.id)
     carteira = registro['carteira'] if registro else 0
@@ -154,32 +195,37 @@ async def processar_transacao_direta(bot, interaction: discord.Interaction, acao
         try:
             valor = int(valor_str)
         except ValueError:
-            return await interaction.response.send_message(embed=criar_embed_erro(interaction.user, "❌ Valor inválido. Use números inteiros ou escreva 'tudo'."))
+            return await enviar(embed=criar_embed_erro(interaction.user, "❌ Valor inválido. Use números inteiros ou escreva 'tudo'."))
 
     if valor <= 0:
-        return await interaction.response.send_message(embed=criar_embed_erro(interaction.user, "❌ O valor deve ser maior que zero."))
+        return await enviar(embed=criar_embed_erro(interaction.user, "❌ O valor deve ser maior que zero."))
 
     if acao == 'depositar':
         if valor > carteira:
-            return await interaction.response.send_message(embed=criar_embed_erro(interaction.user, f"❌ Você tem apenas **{carteira:,}** na carteira.".replace(',', '.')))
+            return await enviar(embed=criar_embed_erro(interaction.user, f"❌ Você tem apenas **{carteira:,}** na carteira.".replace(',', '.')))
         nova_cart, novo_banc = carteira - valor, banco + valor
         texto = f"✅ Depositado **{valor:,}** {moeda_nome} no banco!".replace(',', '.')
     else:
         if valor > banco:
-            return await interaction.response.send_message(embed=criar_embed_erro(interaction.user, f"❌ Você tem apenas **{banco:,}** no banco.".replace(',', '.')))
+            return await enviar(embed=criar_embed_erro(interaction.user, f"❌ Você tem apenas **{banco:,}** no banco.".replace(',', '.')))
         nova_cart, novo_banc = carteira + valor, banco - valor
         texto = f"✅ Sacado **{valor:,}** {moeda_nome} para a carteira!".replace(',', '.')
 
     await bot.db.execute('UPDATE users SET carteira = $1, banco = $2 WHERE id = $3', nova_cart, novo_banc, interaction.user.id)
     
-    await verificar_magnata(bot, interaction)
-
     embed = await gerar_embed_saldo(bot, interaction.user, moeda_nome, moeda_emoji)
     embed.description = f"{texto}\n\n"
     view = ViewSaldo(bot, interaction.user.id, moeda_nome, moeda_emoji)
     
-    await interaction.response.send_message(embed=embed, view=view)
-    view.mensagem_original = await interaction.original_response()
+    msg = await enviar(embed=embed, view=view)
+    
+    if foi_deferido:
+        view.mensagem_original = msg
+    else:
+        view.mensagem_original = await interaction.original_response()
+
+    # Movemos verificar_magnata para o final para não atrasar a resposta e evitar timeouts
+    await verificar_magnata(bot, interaction)
 
 async def executar_roubo(bot, interaction: discord.Interaction, alvo_id: int, moeda_nome: str, moeda_emoji: str):
     """Motor central do Roubo. Executado por botões ou comando de barra."""
@@ -208,8 +254,28 @@ async def executar_roubo(bot, interaction: discord.Interaction, alvo_id: int, mo
     bot.roubos_ativos.add(interaction.user.id)
 
     try:
-        embed_aviso = criar_embed_erro(interaction.user, f"{interaction.user.mention} está tentando roubar a carteira de <@{alvo_id}>!\n\n⏳ O roubo será efetivado em <t:{int(datetime.datetime.now().timestamp()) + 15}:R>")
-        embed_aviso.title = "🚨 TENTATIVA DE ROUBO!"
+        ladrao_data_pre = await bot.db.fetchrow('SELECT carteira FROM users WHERE id = $1', interaction.user.id)
+        l_carteira_pre = ladrao_data_pre['carteira'] if ladrao_data_pre else 0
+
+        vitima_data_pre = await bot.db.fetchrow('SELECT carteira FROM users WHERE id = $1', alvo_id)
+        v_carteira_pre = vitima_data_pre['carteira'] if vitima_data_pre else 0
+
+        if l_carteira_pre <= 0:
+            chance_sucesso = 1.0
+        elif v_carteira_pre <= 0 or l_carteira_pre >= v_carteira_pre:
+            chance_sucesso = 99.0
+        else:
+            chance_sucesso = max(1.0, min(99.0, (l_carteira_pre / v_carteira_pre) * 100.0))
+
+        embed_aviso = criar_embed_erro(
+            interaction.user, 
+            f"{interaction.user.mention} está de olho na carteira de <@{alvo_id}>!\n\n"
+            f"🎒 **Sua Carteira:** {l_carteira_pre:,} {moeda_emoji} *(Mede sua chance)*\n"
+            f"🎯 **Carteira do Alvo:** {v_carteira_pre:,} {moeda_emoji}\n"
+            f"🎲 **Chance de Sucesso:** {chance_sucesso:.1f}%\n\n"
+            f"⏳ O assalto será finalizado em <t:{int(datetime.datetime.now().timestamp()) + 15}:R>"
+        )
+        embed_aviso.title = "🚨 ASSALTO EM ANDAMENTO!"
         await interaction.response.send_message(embed=embed_aviso)
         
         await asyncio.sleep(15)
@@ -220,46 +286,65 @@ async def executar_roubo(bot, interaction: discord.Interaction, alvo_id: int, mo
 
         vitima_data = await bot.db.fetchrow('SELECT carteira FROM users WHERE id = $1', alvo_id)
         v_carteira = vitima_data['carteira'] if vitima_data else 0
+        
+        ladrao_data = await bot.db.fetchrow('SELECT carteira FROM users WHERE id = $1', interaction.user.id)
+        l_carteira = ladrao_data['carteira'] if ladrao_data else 0
 
-        if v_carteira <= 0:
-            texto_falha = f"🎯 **Tentativa de roubo frustrada!** {interaction.user.mention} tentou roubar <@{alvo_id}>, mas a carteira estava vazia. Que decepção..."
+        rolagem = random.uniform(0, 100)
+
+        if rolagem <= chance_sucesso:
+            if v_carteira <= 0:
+                texto_falha = f"🎯 **Tentativa de roubo frustrada!** {interaction.user.mention} rendeu <@{alvo_id}> com sucesso, mas a carteira estava vazia. Que decepção..."
+                embed_ladrao = await gerar_embed_saldo(bot, interaction.user, moeda_nome, moeda_emoji)
+                embed_ladrao.description = f"{texto_falha}\n\n"
+                view = ViewSaldo(bot, interaction.user.id, moeda_nome, moeda_emoji)
+                msg = await interaction.followup.send(embed=embed_ladrao, view=view)
+                view.mensagem_original = msg
+                return
+
+            valor_extraido = math.ceil(v_carteira * 0.80)
+            perda_no_vacuo = math.ceil(valor_extraido * 0.20)
+            ganho_ladrao = valor_extraido - perda_no_vacuo
+
+            await bot.db.execute('UPDATE users SET carteira = carteira - $1 WHERE id = $2', valor_extraido, alvo_id)
+            
+            await bot.db.execute('''
+                INSERT INTO users (id, carteira, total_roubado) VALUES ($1, $2, $3)
+                ON CONFLICT (id) DO UPDATE SET 
+                carteira = users.carteira + EXCLUDED.carteira,
+                total_roubado = COALESCE(users.total_roubado, 0) + EXCLUDED.total_roubado
+            ''', interaction.user.id, ganho_ladrao, ganho_ladrao)
+
+            await verificar_rei_dos_ladroes(bot, interaction)
+
+            texto_crime = (
+                f"🎯 **Roubo executado com sucesso!**\n"
+                f"{interaction.user.mention} extraiu **{valor_extraido:,}** de <@{alvo_id}>.\n"
+                f"🔥 **{perda_no_vacuo:,}** foram perdidos no vácuo durante a fuga.\n"
+                f"💰 {interaction.user.mention} embolsou **{ganho_ladrao:,}** {moeda_nome}."
+            ).replace(',', '.')
+
             embed_ladrao = await gerar_embed_saldo(bot, interaction.user, moeda_nome, moeda_emoji)
-            embed_ladrao.description = f"{texto_falha}\n\n"
+            embed_ladrao.description = f"{texto_crime}\n\n"
             view = ViewSaldo(bot, interaction.user.id, moeda_nome, moeda_emoji)
+            
             msg = await interaction.followup.send(embed=embed_ladrao, view=view)
             view.mensagem_original = msg
-            return
-
-        valor_extraido = math.ceil(v_carteira * 0.80)
-        perda_no_vacuo = math.ceil(valor_extraido * 0.20)
-        ganho_ladrao = valor_extraido - perda_no_vacuo
-
-        # Desconta da vítima
-        await bot.db.execute('UPDATE users SET carteira = carteira - $1 WHERE id = $2', valor_extraido, alvo_id)
-        
-        # Insere na carteira do ladrão E atualiza a coluna total_roubado
-        await bot.db.execute('''
-            INSERT INTO users (id, carteira, total_roubado) VALUES ($1, $2, $3)
-            ON CONFLICT (id) DO UPDATE SET 
-            carteira = users.carteira + EXCLUDED.carteira,
-            total_roubado = COALESCE(users.total_roubado, 0) + EXCLUDED.total_roubado
-        ''', interaction.user.id, ganho_ladrao, ganho_ladrao)
-
-        await verificar_rei_dos_ladroes(bot, interaction)
-
-        texto_crime = (
-            f"🎯 **Roubo executado com sucesso!**\n"
-            f"{interaction.user.mention} extraiu **{valor_extraido:,}** de <@{alvo_id}>.\n"
-            f"🔥 **{perda_no_vacuo:,}** foram perdidos no vácuo durante a fuga.\n"
-            f"💰 {interaction.user.mention} embolsou **{ganho_ladrao:,}** {moeda_nome}."
-        ).replace(',', '.')
-
-        embed_ladrao = await gerar_embed_saldo(bot, interaction.user, moeda_nome, moeda_emoji)
-        embed_ladrao.description = f"{texto_crime}\n\n"
-        view = ViewSaldo(bot, interaction.user.id, moeda_nome, moeda_emoji)
-        
-        msg = await interaction.followup.send(embed=embed_ladrao, view=view)
-        view.mensagem_original = msg
+        else:
+            if l_carteira > 0:
+                await bot.db.execute('UPDATE users SET carteira = 0 WHERE id = $1', interaction.user.id)
+                texto_falha = (
+                    f"🚓 **LADRÃO PEGO EM FLAGRANTE!**\n"
+                    f"{interaction.user.mention} tentou assaltar <@{alvo_id}>, mas tropeçou feio e deixou cair todos os seus **{l_carteira:,}** {moeda_emoji} da própria carteira enquanto fugia correndo!\n\n"
+                    f"👇 O dinheiro está jogado no chão! Quem pegar primeiro, leva."
+                ).replace(',', '.')
+                embed_falha = discord.Embed(description=texto_falha, color=discord.Color.red())
+                view_falha = ViewFalhaRoubo(bot, l_carteira, interaction.user, moeda_emoji)
+                await interaction.followup.send(embed=embed_falha, view=view_falha)
+            else:
+                texto_falha = f"🚓 **LADRÃO PEGO EM FLAGRANTE!**\n{interaction.user.mention} tentou assaltar <@{alvo_id}>, mas falhou miseravelmente. Como ele não tinha nada na carteira, fugiu ileso, mas com o ego ferido."
+                embed_falha = discord.Embed(description=texto_falha, color=discord.Color.red())
+                await interaction.followup.send(embed=embed_falha)
 
     finally:
         bot.roubos_ativos.discard(interaction.user.id)
@@ -285,6 +370,7 @@ class ModalTransferir(discord.ui.Modal):
         self.add_item(self.input_valor)
 
     async def on_submit(self, interaction: discord.Interaction):
+        await interaction.response.defer()
         await processar_transacao_direta(self.bot, interaction, self.acao, self.input_valor.value, self.moeda_nome, self.moeda_emoji)
 
 class ViewSaldo(discord.ui.View):
@@ -306,17 +392,10 @@ class ViewSaldo(discord.ui.View):
 
     @discord.ui.button(label="Depositar", style=discord.ButtonStyle.green, emoji="📥")
     async def btn_depositar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.dono_id:
-            return await interaction.response.send_message(embed=criar_embed_erro(interaction.user, "❌ Você não pode gerenciar o dinheiro alheio."))
-        
-        # O Modal agora abre livremente, mas o backend bloqueia na hora de enviar!
         await interaction.response.send_modal(ModalTransferir(self.bot, 'depositar', self.moeda_nome, self.moeda_emoji))
 
     @discord.ui.button(label="Sacar", style=discord.ButtonStyle.secondary, emoji="📤")
     async def btn_sacar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.dono_id:
-            return await interaction.response.send_message(embed=criar_embed_erro(interaction.user, "❌ Você não pode gerenciar o dinheiro alheio."))
-        
         await interaction.response.send_modal(ModalTransferir(self.bot, 'sacar', self.moeda_nome, self.moeda_emoji))
 
     @discord.ui.button(label="Roubar", style=discord.ButtonStyle.danger, emoji="🔫")
@@ -333,9 +412,13 @@ class ViewSaldo(discord.ui.View):
         if reg_user and reg_user['data_ultimo_farm_voz'] == data_farm_hoje:
             minutos_acumulados = reg_user['tempo_voz_diario'] or 0
 
+        afk_mention = f"<#{interaction.guild.afk_channel.id}>" if interaction.guild and interaction.guild.afk_channel else "Canal de Ausentes"
+
         descricao = (
             f"**🎙️ Farm em Canais de Voz:**\n"
             f"⏱️ **Progresso de Hoje:** Você já acumulou **{minutos_acumulados}/360 minutos** em chamadas.\n\n"
+            f"💰 **Recebimento:** Os UCréditos caem na conta apenas ao **desconectar** ou ir para o {afk_mention}. Trocar de canal de voz não gera pagamento, a contagem de tempo continua!\n"
+            f"🛡️ **Proteção de Saída:** Ao se desconectar, você ganha um escudo de **10 minutos** contra roubos!\n\n"
             f"Você pode farmar até **5.000 {self.moeda_nome}** por dia (o limite reseta às 06:00 BRT). "
             f"O rendimento diminui conforme você passa tempo na call:\n"
             f"• **0m a 30m:** ~50/min *(Rende 1.500)*\n"

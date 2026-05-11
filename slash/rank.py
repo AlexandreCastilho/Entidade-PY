@@ -22,6 +22,13 @@ async def gerar_embed_rank(bot, usuario_id: int, tipo: str, moeda_emoji: str):
         cor = discord.Color.dark_red()
         vazio_msg = "Nenhum crime registrado no sistema ainda."
         footer_prefix = "Total Roubado"
+    elif tipo == "caridade":
+        coluna = "total_doado"
+        filtro = f"{coluna} > 0"
+        titulo = "🕊️ Rank de Caridade - Maiores Doadores"
+        cor = discord.Color.teal()
+        vazio_msg = "Ainda não houve atos de caridade na Entidade."
+        footer_prefix = "Total Doado"
     else: # aposta
         coluna = "balanco_apostas"
         filtro = f"{coluna} IS NOT NULL AND {coluna} != 0" # Inclui negativos, exclui quem zerou exato
@@ -121,6 +128,12 @@ class RankSelect(discord.ui.Select):
                 description="Os jogadores mais lucrativos nas apostas.", 
                 emoji="🎲", 
                 value="aposta"
+            ),
+            discord.SelectOption(
+                label="Anjos da Caridade", 
+                description="As almas mais generosas da União.", 
+                emoji="🕊️", 
+                value="caridade"
             )
         ]
         
