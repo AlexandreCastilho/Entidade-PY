@@ -33,21 +33,90 @@ def converter_tempo(tempo_str: str) -> datetime.timedelta:
     return datetime.timedelta(seconds=total_segundos) if total_segundos > 0 else None
 
 # ==========================================
+# LAYOUT VIEW V2.0 DO SORTEIO
+# ==========================================
+class SorteioLayoutView(discord.ui.LayoutView):
+    def __init__(self, premio: str, descricao: str, doador_id: int, vencedores: int, timestamp: int, imagem: str, contagem: int):
+        super().__init__(timeout=None)
+        
+        container = discord.ui.Container(accent_color=discord.Color.brand_green())
+        container.add_item(discord.ui.MediaGallery(
+            discord.MediaGalleryItem(media="https://i.imgur.com/xeg7ie1.png")
+        ))
+        
+        texto_principal = f"## {premio}"
+        if descricao:
+            texto_principal += f"\n{descricao}"
+        container.add_item(discord.ui.TextDisplay(content=texto_principal))
+        
+        if imagem:
+            container.add_item(discord.ui.MediaGallery(discord.MediaGalleryItem(media=imagem)))
+            
+        container.add_item(discord.ui.Separator())
+        
+        texto_info = ""
+        if doador_id:
+            texto_info += f"**Doador:** <@{doador_id}>\n"
+        texto_info += f"**Vencedores:** {vencedores}\n"
+        texto_info += f"**Termina:** <t:{timestamp}:R>\n"
+        texto_info += f"👥 **Participantes:** {contagem}"
+        
+        container.add_item(discord.ui.TextDisplay(content=texto_info))
+        container.add_item(discord.ui.Separator())
+        
+        container.add_item(discord.ui.ActionRow(BotaoParticiparSorteio()))
+        
+        self.add_item(container)
+
+class SorteioLayoutViewDisabled(discord.ui.LayoutView):
+    def __init__(self, premio: str, descricao: str, doador_id: int, vencedores: int, timestamp: int, imagem: str, contagem: int):
+        super().__init__(timeout=None)
+        
+        container = discord.ui.Container(accent_color=discord.Color.dark_theme())
+        container.add_item(discord.ui.MediaGallery(
+            discord.MediaGalleryItem(media="https://i.imgur.com/xeg7ie1.png")
+        ))
+        
+        texto_principal = f"## {premio}"
+        if descricao:
+            texto_principal += f"\n{descricao}"
+        container.add_item(discord.ui.TextDisplay(content=texto_principal))
+        
+        if imagem:
+            container.add_item(discord.ui.MediaGallery(discord.MediaGalleryItem(media=imagem)))
+            
+        container.add_item(discord.ui.Separator())
+        
+        texto_info = ""
+        if doador_id:
+            texto_info += f"**Doador:** <@{doador_id}>\n"
+        texto_info += f"**Vencedores:** {vencedores}\n"
+        texto_info += f"**Terminou em:** <t:{timestamp}:f>\n"
+        texto_info += f"👥 **Participantes Finais:** {contagem}"
+        
+        container.add_item(discord.ui.TextDisplay(content=texto_info))
+        container.add_item(discord.ui.Separator())
+        
+        btn = discord.ui.Button(label="Sorteio Encerrado", style=discord.ButtonStyle.secondary, emoji="🔒", disabled=True)
+        container.add_item(discord.ui.ActionRow(btn))
+        
+        self.add_item(container)
+
+# ==========================================
 # O BOTÃO PERSISTENTE COM CONTADOR REAL-TIME
 # ==========================================
-class SorteioView(discord.ui.View):
-    def __init__(self, bot):
-        super().__init__(timeout=None)
-        self.bot = bot
+class BotaoParticiparSorteio(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Participar do Sorteio", style=discord.ButtonStyle.blurple, emoji="🎉", custom_id="btn_participar_sorteio_fixo")
 
-    @discord.ui.button(label="Participar do Sorteio", style=discord.ButtonStyle.blurple, emoji="🎉", custom_id="btn_participar_sorteio_fixo")
-    async def btn_participar(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def callback(self, interaction: discord.Interaction):
         mensagem_id = interaction.message.id
         usuario_id = interaction.user.id
+        bot = interaction.client
 
         try:
             # Tenta registrar a participação
-            resultado = await self.bot.db.execute(
+            resultado = await bot.db.execute(
                 '''INSERT INTO sorteio_participantes (mensagem_id, usuario_id) 
                    VALUES ($1, $2) ON CONFLICT DO NOTHING''',
                 mensagem_id, usuario_id
@@ -55,27 +124,28 @@ class SorteioView(discord.ui.View):
 
             if resultado == "INSERT 0 1":
                 # Se foi uma nova inscrição, buscamos o total atualizado
-                contagem = await self.bot.db.fetchval(
+                contagem = await bot.db.fetchval(
                     'SELECT COUNT(*) FROM sorteio_participantes WHERE mensagem_id = $1', 
                     mensagem_id
                 )
 
-                # Atualizamos a Embed da mensagem original
-                embed = interaction.message.embeds[0]
-                
-                # A lógica aqui é encontrar a linha de "Participantes" e atualizar o número
-                linhas = embed.description.split('\n')
-                nova_descricao = []
-                for linha in linhas:
-                    if "👥 **Participantes:**" in linha:
-                        nova_descricao.append(f"👥 **Participantes:** {contagem}")
-                    else:
-                        nova_descricao.append(linha)
-                
-                embed.description = "\n".join(nova_descricao)
-                await interaction.message.edit(embed=embed)
-                
-                await interaction.response.send_message("🎉 **Inscrição confirmada!** Boa sorte!", ephemeral=True)
+                # Reconstruir o LayoutView em vez do Embed
+                tarefa = await bot.db.fetchrow('SELECT dados_extras FROM tarefas_agendadas WHERE mensagem_id = $1', mensagem_id)
+                if tarefa:
+                    dados = json.loads(tarefa['dados_extras'])
+                    nova_view = SorteioLayoutView(
+                        premio=dados.get("premio", "Prêmio Desconhecido"),
+                        descricao=dados.get("descricao"),
+                        doador_id=dados.get("doador_id"),
+                        vencedores=dados.get("vencedores", 1),
+                        timestamp=dados.get("timestamp", 0),
+                        imagem=dados.get("imagem"),
+                        contagem=contagem
+                    )
+                    await interaction.response.edit_message(view=nova_view)
+                    await interaction.followup.send("🎉 **Inscrição confirmada!** Boa sorte!", ephemeral=True)
+                else:
+                    await interaction.response.send_message("🎉 **Inscrição confirmada!** (O sorteio não existe mais no banco de dados)", ephemeral=True)
             else:
                 await interaction.response.send_message("❌ **Você já está participando** deste sorteio.", ephemeral=True)
         except Exception as e:
@@ -87,7 +157,9 @@ class SorteioView(discord.ui.View):
 class SorteioCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.bot.add_view(SorteioView(self.bot))
+        view_listener = discord.ui.View(timeout=None)
+        view_listener.add_item(BotaoParticiparSorteio())
+        self.bot.add_view(view_listener)
 
     @commands.Cog.listener()
     async def on_tarefa_sorteio(self, tarefa):
@@ -100,23 +172,40 @@ class SorteioCog(commands.Cog):
             try:
                 dados = json.loads(tarefa['dados_extras'])
                 premio = dados.get("premio")
+                descricao = dados.get("descricao")
                 vencedores_alvo = dados.get("vencedores", 1)
                 autor_id = dados.get("autor_id")
+                doador_id = dados.get("doador_id")
+                imagem = dados.get("imagem")
+                timestamp = dados.get("timestamp", 0)
             except:
                 premio = tarefa['dados_extras']
+                descricao = None
                 vencedores_alvo = 1
                 autor_id = None
+                doador_id = None
+                imagem = None
+                timestamp = 0
 
             registros = await self.bot.db.fetch(
                 'SELECT usuario_id FROM sorteio_participantes WHERE mensagem_id = $1', 
                 tarefa['mensagem_id']
             )
             participantes_ids = [r['usuario_id'] for r in registros]
+            contagem = len(participantes_ids)
 
-            # Desabilita o botão
-            view_final = SorteioView(self.bot)
-            for child in view_final.children: child.disabled = True
-            await mensagem.edit(view=view_final)
+            # Desabilita o sorteio com a View de Encerrado
+            view_final = SorteioLayoutViewDisabled(
+                premio=premio,
+                descricao=descricao,
+                doador_id=doador_id,
+                vencedores=vencedores_alvo,
+                timestamp=timestamp,
+                imagem=imagem,
+                contagem=contagem
+            )
+            
+            await mensagem.edit(view=view_final, embed=None)
 
             if participantes_ids:
                 total_sortear = min(vencedores_alvo, len(participantes_ids))
@@ -125,7 +214,10 @@ class SorteioCog(commands.Cog):
                 
                 anuncio = f"🎉 Parabéns {', '.join(mencoes)}! "
                 anuncio += f"Vocês ganharam **{premio}**!" if len(sorteados) > 1 else f"Você ganhou **{premio}**!"
-                if autor_id: anuncio += f"\n*(Sorteio criado por <@{autor_id}>)*"
+                if doador_id:
+                    anuncio += f"\n*(Agradecimentos ao doador <@{doador_id}>!)*"
+                elif autor_id: 
+                    anuncio += f"\n*(Sorteio criado por <@{autor_id}>)*"
                 
                 await canal.send(anuncio)
             else:
@@ -140,53 +232,53 @@ class SorteioCog(commands.Cog):
     @app_commands.describe(
         premio="O que será sorteado?", 
         tempo="Ex: '1 dia', '2h', '30 minutos'",
+        descricao="Descreva mais sobre o prêmio",
         vencedores="Quantidade de ganhadores",
-        imagem="URL de uma imagem para a miniatura (thumbnail)"
+        imagem="URL de uma imagem para o sorteio",
+        doador="Membro que doou o prêmio (opcional)",
+        canal="Canal onde o sorteio será enviado (padrão: atual)"
     )
     @app_commands.default_permissions(manage_messages=True)
-    async def criar_sorteio(self, interaction: discord.Interaction, premio: str, tempo: str, vencedores: int = 1, imagem: str = None):
+    async def criar_sorteio(self, interaction: discord.Interaction, premio: str, tempo: str, descricao: str = None, vencedores: int = 1, imagem: str = None, doador: discord.Member = None, canal: discord.TextChannel = None):
         delta = converter_tempo(tempo)
         if not delta:
             return await interaction.response.send_message("❌ Formato de tempo inválido.", ephemeral=True)
 
+        canal_alvo = canal or interaction.channel
         data_final = datetime.datetime.now(datetime.timezone.utc) + delta
         timestamp = int(data_final.timestamp())
 
-        # Montagem da Embed com autor, contador e thumbnail
-        embed = discord.Embed(
-            title="🎁 Sorteio Cósmico! 🎁",
-            color=discord.Color.brand_green()
-        )
-        
-        embed.description = (
-            f"**Prêmio:** {premio}\n"
-            f"**Criado por:** {interaction.user.mention}\n"
-            f"**Vencedores:** {vencedores}\n"
-            f"**Termina:** <t:{timestamp}:R>\n\n"
-            f"👥 **Participantes:** 0\n"
-            "Clique no botão abaixo para participar!"
+        view = SorteioLayoutView(
+            premio=premio,
+            descricao=descricao,
+            doador_id=doador.id if doador else None,
+            vencedores=vencedores,
+            timestamp=timestamp,
+            imagem=imagem,
+            contagem=0
         )
 
-        embed.set_image(url="https://imgur.com/Unr8X06.png")
+        try:
+            msg = await canal_alvo.send(view=view)
+            await interaction.response.send_message(f"✅ Sorteio enviado com sucesso em {canal_alvo.mention}!", ephemeral=True)
+        except discord.Forbidden:
+            return await interaction.response.send_message(f"❌ Não tenho permissão para enviar mensagens em {canal_alvo.mention}.", ephemeral=True)
 
-        if imagem:
-            embed.set_thumbnail(url=imagem)
-
-        await interaction.response.send_message("✅ Sorteio enviado ao canal!", ephemeral=True)
-        msg = await interaction.channel.send(embed=embed, view=SorteioView(self.bot))
-
-        # Salva dados extras incluindo autor e imagem no JSON
+        # Salva dados extras incluindo autor, imagem, descricao, doador
         dados_json = json.dumps({
             "premio": premio, 
+            "descricao": descricao,
             "vencedores": vencedores, 
             "autor_id": interaction.user.id,
-            "imagem": imagem
+            "doador_id": doador.id if doador else None,
+            "imagem": imagem,
+            "timestamp": timestamp
         })
 
         await self.bot.db.execute(
             '''INSERT INTO tarefas_agendadas (tipo, data_execucao, canal_id, mensagem_id, dados_extras)
                VALUES ($1, $2, $3, $4, $5)''',
-            'sorteio', data_final, interaction.channel.id, msg.id, dados_json
+            'sorteio', data_final, canal_alvo.id, msg.id, dados_json
         )
 
         cog_tarefas = self.bot.get_cog('GerenciadorTarefas')

@@ -19,7 +19,7 @@ class BotaoVerSaldo(discord.ui.Button):
         
         embed = await gerar_embed_saldo(bot, interaction.user, moeda_nome, moeda_emoji)
         
-        await interaction.followup.send(embed=embed)
+        await interaction.followup.send(embed=embed, ephemeral=True)
         
         await verificar_magnata(bot, interaction)
 
@@ -240,7 +240,7 @@ class GuiaLayout2(discord.ui.LayoutView):
         texto_gasto = (
             "# Como gastar UCréditos?\n"
             "- Use o comando `/loja` no chat <#1000948732235362325> para ver o que está a venda!\n"
-            "- Fique de olho no chat <#1000948743228620840>.As vezes acontecem rifas onde você pode gastar UCréditos para aumentar sua chance de ganhar."
+            "- Fique de olho no chat <#1000948743228620840>. As vezes acontecem rifas onde você pode gastar UCréditos para aumentar sua chance de ganhar."
         )
         container.add_item(discord.ui.TextDisplay(content=texto_gasto))
         
@@ -276,10 +276,12 @@ class BotaoListaComandos(discord.ui.Button):
             "• `/sacar` - Retira seus UCréditos do banco para a carteira.\n"
             "• `/transferir` - Transfere UCréditos do seu banco para o banco de outro membro.\n\n"
             "**Gastos & Mercado:**\n"
-            "• `/loja` - Abre o mercado para comprar melhorias e cargos exclusivos.\n\n"
+            "• `/loja` - Abre o mercado para comprar melhorias e cargos exclusivos.\n"
+            "• `/caridade` - Doe sua fortuna para nivelar os membros mais pobres do servidor.\n\n"
             "**O Submundo & Cassino:**\n"
             "• `/roubar` - Tente a sorte roubando a carteira de outro Tenno.\n"
-            "• `/apostar` - Abre o menu de apostas e jogos.\n\n"
+            "• `/apostar` - Abre o menu de apostas e jogos.\n"
+            "• `/espião` - Acesse informações privilegiadas sobre a economia do servidor.\n\n"
             "**Competição & Rankings:**\n"
             "• `/rank` - Mostra os placares globais. O 1º lugar de cada categoria recebe um cargo exclusivo:\n"
             f"  {texto_magnata} (Maior saldo no Banco)\n"
@@ -305,15 +307,16 @@ class BotaoDetalhesRoubo(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction):
         descricao = (
             f"## 🔫 Como funciona o Roubo?\n"
-            f"O submundo exige preparo! O sucesso de um roubo depende do seu equipamento (o saldo da sua carteira).\n\n"
+            f"O submundo é um lugar de risco e oportunidade. Qualquer um pode tentar a sorte e roubar a carteira de outro membro.\n\n"
             f"⚖️ **Chance de Sucesso:**\n"
-            f"A chance é calculada comparando a sua carteira com a da vítima.\n"
-            f"• Se você não tiver nada na carteira, sua chance é de apenas **1%**.\n"
-            f"• Se você tiver mais dinheiro que a vítima, sua chance chega a **99%**.\n\n"
-            f"✅ **Em caso de Sucesso:**\n"
-            f"Você extrai **80%** do dinheiro que a vítima tem na carteira (com uma pequena perda no vácuo).\n\n"
-            f"❌ **Em caso de Falha:**\n"
-            f"Se der errado, o feitiço vira contra o feiticeiro! Você **deixará cair TODO o dinheiro da sua carteira no chão** do chat, e o primeiro que clicar no botão leva tudo!\n\n"
+            f"A chance de um roubo ser bem-sucedido é fixa em **80%**.\n"
+            f"A chance de falha é de **20%**.\n\n"
+            f"✅ **Em caso de Sucesso (80% de chance):**\n"
+            f"Você extrai **80%** do dinheiro que a vítima tem na carteira e embolsa a maior parte (há uma pequena perda durante a fuga).\n\n"
+            f"❌ **Em caso de Falha Desastrada:**\n"
+            f"A sua fuga é desastrada! Você ainda consegue roubar os 80% da carteira da vítima. Uma parte é perdida no vácuo e o restante é dividido: você **embolsa metade** e a outra metade **cai no chão** do chat. O primeiro que clicar no botão leva o dinheiro que caiu! *(O ladrão fica atordoado e deve aguardar 10 segundos para tentar pegar o dinheiro de volta)*.\n\n"
+            f"🚓 **Em caso de Falha Crítica (A Prisão):**\n"
+            f"Dentre as falhas, existe uma pequena chance de você ser **preso**. Você perde TODO o dinheiro da sua própria carteira, e deixa cair todo o dinheiro roubado da vítima no chão. Para sair da prisão, terá que pagar uma fiança de **3x o valor que roubou** diretamente para a vítima (descontado do seu banco)!\n\n"
             f"⏳ **O Andamento (15 Segundos):**\n"
             f"O roubo leva 15 segundos. Durante esse tempo, o ladrão **não pode depositar nem apostar** o próprio dinheiro. Ele também ficará mais 10 segundos sem poder depositar o dinheiro após o roubo bem sucedido."
         )
@@ -345,7 +348,9 @@ class BotaoDetalhesApostas(discord.ui.Button):
             f"🔴 **Aposta Arriscada:** 10% de chance | Multiplica por 10.0x\n\n"
             f"🃏 **Blackjack (21):**\n"
             f"Enfrente a banca! Peça cartas para chegar o mais próximo possível de 21 sem ultrapassar esse valor. Blackjacks naturais (21 nas duas primeiras cartas) pagam **1.5x** o valor apostado!\n\n"
-            f"👑 O membro mais lucrativo do servidor recebe o cobiçado cargo de {texto_tigrinho}!"
+            f"🚀 **Foguetinho (Crash):**\n"
+            f"Lance o foguete e assista o multiplicador subir! Você deve clicar em retirar antes que ele exploda para multiplicar sua aposta e garantir o lucro. Se o foguete explodir primeiro, você perde tudo.\n\n"
+            f"� O membro mais lucrativo do servidor recebe o cobiçado cargo de {texto_tigrinho}!"
         )
         
         layout_info = discord.ui.LayoutView()
@@ -367,8 +372,9 @@ class GuiaLayout3(discord.ui.LayoutView):
         texto_crime = (
             "## A Vida no Crime & Cassino\n"
             "- Gosta do perigo? Use o comando `/roubar` para tentar furtar a carteira de outros membros!\n"
-            "- **Mas cuidado:** O risco do roubo está em perder o próprio dinheiro tentando roubar! Se falhar, todo o saldo da sua carteira cairá no chão. Além disso, Tennos ativos recebem 🛡️**escudos** e você não poderá depositar por um tempo após tentar roubar.\n"
-            "- **Sente-se com sorte?** O cassino está aberto! Use o comando `/apostar` para multiplicar seu dinheiro, se estiver disposto a correr os riscos."
+            "- **Mas cuidado:** O risco do roubo é alto! Você pode tropeçar e perder parte do lucro ou, pior ainda, ter uma **falha crítica**, ser preso e ter que pagar uma fiança tripla para a vítima! Além disso, Tennos ativos recebem 🛡️**escudos** e você não poderá depositar por um tempo após tentar roubar.\n"
+            "- **Sente-se com sorte?** O cassino está aberto! Use o comando `/apostar` para multiplicar seu dinheiro, se estiver disposto a correr os riscos.\n"
+            "- **Procurando o alvo perfeito?** Use o comando `/espião` para comprar informações e descobrir quem tem mais dinheiro dando sopa na carteira."
         )
         container.add_item(discord.ui.TextDisplay(content=texto_crime))
 

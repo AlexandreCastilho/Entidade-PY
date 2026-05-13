@@ -137,9 +137,19 @@ class ViewFalhaRoubo(discord.ui.View):
         self.moeda_emoji = moeda_emoji
         self.coletado = False
         self.lock = asyncio.Lock()
+        self.tempo_criacao = datetime.datetime.now(datetime.timezone.utc)
 
     @discord.ui.button(label="Pegar Dinheiro", style=discord.ButtonStyle.success, emoji="💸")
     async def btn_pegar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id == self.ladrao.id:
+            if hasattr(self.bot, 'presos') and interaction.user.id in self.bot.presos:
+                return await interaction.response.send_message("❌ Você está preso! Mãos na cabeça, não tente pegar o dinheiro do chão.", ephemeral=True)
+            agora = datetime.datetime.now(datetime.timezone.utc)
+            tempo_passado = (agora - self.tempo_criacao).total_seconds()
+            if tempo_passado < 10:
+                tempo_restante = int(10 - tempo_passado)
+                return await interaction.response.send_message(f"❌ Você está se recuperando da queda! Aguarde mais {tempo_restante} segundos para tentar pegar o dinheiro de volta.", ephemeral=True)
+
         async with self.lock:
             if self.coletado:
                 return await interaction.response.send_message("❌ Alguém foi mais rápido e já pegou o dinheiro!", ephemeral=True)
@@ -160,6 +170,45 @@ class ViewFalhaRoubo(discord.ui.View):
         
         await interaction.response.edit_message(embed=embed, view=self)
         await interaction.followup.send(f"🎉 Você pegou **{self.valor:,}** {self.moeda_emoji} que caíram de {self.ladrao.mention}!".replace(',', '.'), ephemeral=True)
+
+class ViewFianca(discord.ui.View):
+    def __init__(self, bot, ladrao_id, vitima_id, divida, moeda_emoji):
+        super().__init__(timeout=120.0)
+        self.bot = bot
+        self.ladrao_id = ladrao_id
+        self.vitima_id = vitima_id
+        self.divida = divida
+        self.moeda_emoji = moeda_emoji
+
+    @discord.ui.button(label="Pagar Dívida (Banco)", style=discord.ButtonStyle.success, emoji="🏦")
+    async def btn_pagar(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.ladrao_id:
+            return await interaction.response.send_message("❌ Apenas o presidiário pode pagar essa dívida.", ephemeral=True)
+            
+        reg = await self.bot.db.fetchrow('SELECT banco FROM users WHERE id = $1', self.ladrao_id)
+        banco = reg['banco'] if reg else 0
+        
+        if banco < self.divida:
+            return await interaction.response.send_message(f"❌ Saldo insuficiente no banco! Você precisa de **{self.divida:,}** {self.moeda_emoji}.".replace(',', '.'), ephemeral=True)
+            
+        await self.bot.db.execute('UPDATE users SET banco = banco - $1 WHERE id = $2', self.divida, self.ladrao_id)
+        await self.bot.db.execute('''
+            INSERT INTO users (id, banco) VALUES ($1, $2)
+            ON CONFLICT (id) DO UPDATE SET banco = users.banco + EXCLUDED.banco
+        ''', self.vitima_id, self.divida)
+        
+        if hasattr(self.bot, 'presos') and self.ladrao_id in self.bot.presos:
+            del self.bot.presos[self.ladrao_id]
+            
+        for child in self.children:
+            child.disabled = True
+            
+        embed = interaction.message.embeds[0]
+        embed.color = discord.Color.green()
+        embed.title = "🔓 Liberdade Concedida!"
+        embed.description = f"A dívida de **{self.divida:,}** {self.moeda_emoji} foi paga para <@{self.vitima_id}>.\nVocê está livre para voltar ao submundo e às apostas.".replace(',', '.')
+        
+        await interaction.response.edit_message(embed=embed, view=self)
 
 
 async def processar_transacao_direta(bot, interaction: discord.Interaction, acao: str, valor_str: str, moeda_nome: str, moeda_emoji: str):
@@ -229,6 +278,20 @@ async def processar_transacao_direta(bot, interaction: discord.Interaction, acao
 
 async def executar_roubo(bot, interaction: discord.Interaction, alvo_id: int, moeda_nome: str, moeda_emoji: str):
     """Motor central do Roubo. Executado por botões ou comando de barra."""
+    if hasattr(bot, 'presos') and interaction.user.id in bot.presos:
+        dados_preso = bot.presos[interaction.user.id]
+        embed_preso = discord.Embed(
+            title="🚓 Mãos ao alto!",
+            description=(
+                f"Você está preso e não pode cometer crimes ou apostar!\n\n"
+                f"Para ser liberado, você deve pagar uma restituição de **{dados_preso['divida']:,}** {moeda_emoji} para <@{dados_preso['vitima_id']}>.\n"
+                f"O valor será debitado do seu **Banco**."
+            ).replace(',', '.'),
+            color=discord.Color.dark_red()
+        )
+        view_fianca = ViewFianca(bot, interaction.user.id, dados_preso['vitima_id'], dados_preso['divida'], moeda_emoji)
+        return await interaction.response.send_message(embed=embed_preso, view=view_fianca, ephemeral=True)
+
     if interaction.user.id == alvo_id:
         return await interaction.response.send_message(embed=criar_embed_erro(interaction.user, "❌ Você não pode roubar a si mesmo. Tente algo menos autodestrutivo."))
 
@@ -260,19 +323,14 @@ async def executar_roubo(bot, interaction: discord.Interaction, alvo_id: int, mo
         vitima_data_pre = await bot.db.fetchrow('SELECT carteira FROM users WHERE id = $1', alvo_id)
         v_carteira_pre = vitima_data_pre['carteira'] if vitima_data_pre else 0
 
-        if l_carteira_pre <= 0:
-            chance_sucesso = 1.0
-        elif v_carteira_pre <= 0 or l_carteira_pre >= v_carteira_pre:
-            chance_sucesso = 99.0
-        else:
-            chance_sucesso = max(1.0, min(99.0, (l_carteira_pre / v_carteira_pre) * 100.0))
+        chance_sucesso = 80.0
 
         embed_aviso = criar_embed_erro(
             interaction.user, 
             f"{interaction.user.mention} está de olho na carteira de <@{alvo_id}>!\n\n"
-            f"🎒 **Sua Carteira:** {l_carteira_pre:,} {moeda_emoji} *(Mede sua chance)*\n"
             f"🎯 **Carteira do Alvo:** {v_carteira_pre:,} {moeda_emoji}\n"
-            f"🎲 **Chance de Sucesso:** {chance_sucesso:.1f}%\n\n"
+            f"🎲 **Chance de Sucesso:** {chance_sucesso:.1f}%\n"
+            f"💥 **Chance de Falha:** {100 - chance_sucesso:.1f}% (Se falhar, metade do roubo cai no chão!)\n\n"
             f"⏳ O assalto será finalizado em <t:{int(datetime.datetime.now().timestamp()) + 15}:R>"
         )
         embed_aviso.title = "🚨 ASSALTO EM ANDAMENTO!"
@@ -286,35 +344,32 @@ async def executar_roubo(bot, interaction: discord.Interaction, alvo_id: int, mo
 
         vitima_data = await bot.db.fetchrow('SELECT carteira FROM users WHERE id = $1', alvo_id)
         v_carteira = vitima_data['carteira'] if vitima_data else 0
-        
-        ladrao_data = await bot.db.fetchrow('SELECT carteira FROM users WHERE id = $1', interaction.user.id)
-        l_carteira = ladrao_data['carteira'] if ladrao_data else 0
 
         rolagem = random.uniform(0, 100)
 
-        if rolagem <= chance_sucesso:
-            if v_carteira <= 0:
-                texto_falha = f"🎯 **Tentativa de roubo frustrada!** {interaction.user.mention} rendeu <@{alvo_id}> com sucesso, mas a carteira estava vazia. Que decepção..."
-                embed_ladrao = await gerar_embed_saldo(bot, interaction.user, moeda_nome, moeda_emoji)
-                embed_ladrao.description = f"{texto_falha}\n\n"
-                view = ViewSaldo(bot, interaction.user.id, moeda_nome, moeda_emoji)
-                msg = await interaction.followup.send(embed=embed_ladrao, view=view)
-                view.mensagem_original = msg
-                return
+        if v_carteira <= 0:
+            texto_falha = f"🎯 **Tentativa de roubo frustrada!** {interaction.user.mention} rendeu <@{alvo_id}> com sucesso, mas a carteira estava vazia. Que decepção..."
+            embed_ladrao = await gerar_embed_saldo(bot, interaction.user, moeda_nome, moeda_emoji)
+            embed_ladrao.description = f"{texto_falha}\n\n"
+            view = ViewSaldo(bot, interaction.user.id, moeda_nome, moeda_emoji)
+            msg = await interaction.followup.send(embed=embed_ladrao, view=view)
+            view.mensagem_original = msg
+            return
 
+        valor_extraido = math.ceil(v_carteira * 0.80)
+        await bot.db.execute('UPDATE users SET carteira = carteira - $1 WHERE id = $2', valor_extraido, alvo_id)
+
+        if rolagem <= chance_sucesso:
             valor_extraido = math.ceil(v_carteira * 0.80)
             perda_no_vacuo = math.ceil(valor_extraido * 0.20)
             ganho_ladrao = valor_extraido - perda_no_vacuo
 
-            await bot.db.execute('UPDATE users SET carteira = carteira - $1 WHERE id = $2', valor_extraido, alvo_id)
-            
             await bot.db.execute('''
                 INSERT INTO users (id, carteira, total_roubado) VALUES ($1, $2, $3)
                 ON CONFLICT (id) DO UPDATE SET 
                 carteira = users.carteira + EXCLUDED.carteira,
                 total_roubado = COALESCE(users.total_roubado, 0) + EXCLUDED.total_roubado
             ''', interaction.user.id, ganho_ladrao, ganho_ladrao)
-
             await verificar_rei_dos_ladroes(bot, interaction)
 
             texto_crime = (
@@ -323,28 +378,61 @@ async def executar_roubo(bot, interaction: discord.Interaction, alvo_id: int, mo
                 f"🔥 **{perda_no_vacuo:,}** foram perdidos no vácuo durante a fuga.\n"
                 f"💰 {interaction.user.mention} embolsou **{ganho_ladrao:,}** {moeda_nome}."
             ).replace(',', '.')
-
             embed_ladrao = await gerar_embed_saldo(bot, interaction.user, moeda_nome, moeda_emoji)
             embed_ladrao.description = f"{texto_crime}\n\n"
             view = ViewSaldo(bot, interaction.user.id, moeda_nome, moeda_emoji)
-            
             msg = await interaction.followup.send(embed=embed_ladrao, view=view)
             view.mensagem_original = msg
         else:
-            if l_carteira > 0:
+            rolagem_critica = random.uniform(0, 100)
+            if rolagem_critica <= 10.0:
+                valor_no_chao = valor_extraido
+                divida = valor_extraido * 3
+                
                 await bot.db.execute('UPDATE users SET carteira = 0 WHERE id = $1', interaction.user.id)
+                
+                if not hasattr(bot, 'presos'):
+                    bot.presos = {}
+                bot.presos[interaction.user.id] = {
+                    'vitima_id': alvo_id,
+                    'divida': divida
+                }
+                
                 texto_falha = (
-                    f"🚓 **LADRÃO PEGO EM FLAGRANTE!**\n"
-                    f"{interaction.user.mention} tentou assaltar <@{alvo_id}>, mas tropeçou feio e deixou cair todos os seus **{l_carteira:,}** {moeda_emoji} da própria carteira enquanto fugia correndo!\n\n"
-                    f"👇 O dinheiro está jogado no chão! Quem pegar primeiro, leva."
+                    f"🚓 **FALHA CRÍTICA! VOCÊ FOI PRESO!**\n"
+                    f"{interaction.user.mention} tentou roubar **{valor_extraido:,}** {moeda_emoji} de <@{alvo_id}>, mas foi pego em flagrante!\n"
+                    f"A polícia confiscou **todo** o dinheiro que estava na carteira do ladrão e a carga roubada caiu no chão!\n\n"
+                    f"🔒 **Consequência:** Ele não poderá roubar ou apostar até pagar uma indenização de **{divida:,}** {moeda_emoji} para a vítima (saindo do Banco)!\n\n"
+                    f"👇 **{valor_no_chao:,}** {moeda_emoji} estão jogados no chão! Quem pegar primeiro, leva. *(O ladrão está preso!)*"
                 ).replace(',', '.')
-                embed_falha = discord.Embed(description=texto_falha, color=discord.Color.red())
-                view_falha = ViewFalhaRoubo(bot, l_carteira, interaction.user, moeda_emoji)
+                embed_falha = discord.Embed(description=texto_falha, color=discord.Color.dark_red())
+                view_falha = ViewFalhaRoubo(bot, valor_no_chao, interaction.user, moeda_emoji)
                 await interaction.followup.send(embed=embed_falha, view=view_falha)
             else:
-                texto_falha = f"🚓 **LADRÃO PEGO EM FLAGRANTE!**\n{interaction.user.mention} tentou assaltar <@{alvo_id}>, mas falhou miseravelmente. Como ele não tinha nada na carteira, fugiu ileso, mas com o ego ferido."
+                perda_no_vacuo_falha = math.ceil(valor_extraido * 0.20)
+                sobra = valor_extraido - perda_no_vacuo_falha
+                
+                ganho_ladrao_falha = math.ceil(sobra / 2)
+                valor_no_chao = sobra - ganho_ladrao_falha
+                
+                await bot.db.execute('''
+                    INSERT INTO users (id, carteira, total_roubado) VALUES ($1, $2, $3)
+                    ON CONFLICT (id) DO UPDATE SET 
+                    carteira = users.carteira + EXCLUDED.carteira,
+                    total_roubado = COALESCE(users.total_roubado, 0) + EXCLUDED.total_roubado
+                ''', interaction.user.id, ganho_ladrao_falha, ganho_ladrao_falha)
+                await verificar_rei_dos_ladroes(bot, interaction)
+
+                texto_falha = (
+                    f"🚓 **FUGA DESASTRADA!**\n"
+                    f"{interaction.user.mention} conseguiu roubar **{valor_extraido:,}** {moeda_emoji} de <@{alvo_id}>, mas na fuga tropeçou!\n"
+                    f"🔥 **{perda_no_vacuo_falha:,}** foram perdidos no vácuo durante a confusão.\n\n"
+                    f"💰 Apesar do desastre, ele embolsou **{ganho_ladrao_falha:,}** {moeda_nome}.\n\n"
+                    f"👇 **{valor_no_chao:,}** {moeda_emoji} caíram no chão! Quem pegar primeiro, leva. *(O ladrão está atordoado por 10s)*"
+                ).replace(',', '.')
                 embed_falha = discord.Embed(description=texto_falha, color=discord.Color.red())
-                await interaction.followup.send(embed=embed_falha)
+                view_falha = ViewFalhaRoubo(bot, valor_no_chao, interaction.user, moeda_emoji)
+                await interaction.followup.send(embed=embed_falha, view=view_falha)
 
     finally:
         bot.roubos_ativos.discard(interaction.user.id)

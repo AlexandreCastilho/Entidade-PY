@@ -6,6 +6,7 @@ import math
 import datetime
 import asyncio
 import time
+from slash.saldo import ViewFianca
 
 # ID do Cargo de Melhor Apostador (Exclusivo do 1º lugar em apostas)
 CARGO_APOSTADOR_ID = 1500145598794563816
@@ -24,6 +25,23 @@ TAXA_CRESCIMENTO = 0.04     # Velocidade do foguete
 # ==========================================
 # LÓGICA COMPARTILHADA (RANK DE APOSTAS)
 # ==========================================
+async def verificar_preso(bot, interaction: discord.Interaction, enviar_func, moeda_emoji: str):
+    if hasattr(bot, 'presos') and interaction.user.id in bot.presos:
+        dados_preso = bot.presos[interaction.user.id]
+        embed_preso = discord.Embed(
+            title="🚓 Mãos ao alto!",
+            description=(
+                f"Você está preso e não pode cometer crimes ou apostar!\n\n"
+                f"Para ser liberado, você deve pagar uma restituição de **{dados_preso['divida']:,}** {moeda_emoji} para <@{dados_preso['vitima_id']}>.\n"
+                f"O valor será debitado do seu **Banco**."
+            ).replace(',', '.'),
+            color=discord.Color.dark_red()
+        )
+        view_fianca = ViewFianca(bot, interaction.user.id, dados_preso['vitima_id'], dados_preso['divida'], moeda_emoji)
+        await enviar_func(embed=embed_preso, view=view_fianca, ephemeral=True)
+        return True
+    return False
+
 async def verificar_rei_do_tigrinho(bot, interaction: discord.Interaction):
     """Verifica quem é o líder de apostas e gerencia o cargo exclusivo."""
     if not interaction.guild:
@@ -230,6 +248,9 @@ class BlackjackView(discord.ui.View):
 async def processar_blackjack(bot, interaction: discord.Interaction, valor: str, moeda_emoji: str):
     foi_deferido = interaction.response.is_done()
     enviar = interaction.followup.send if foi_deferido else interaction.response.send_message
+
+    if await verificar_preso(bot, interaction, enviar, moeda_emoji):
+        return
 
     if hasattr(bot, 'roubos_ativos') and interaction.user.id in bot.roubos_ativos:
         return await enviar("❌ Você está focado no crime agora! Termine o seu assalto antes de tentar a sorte.", ephemeral=True)
@@ -466,6 +487,9 @@ async def criar_lobby_crash(bot, interaction: discord.Interaction, jogador: disc
     foi_deferido = interaction.response.is_done()
     enviar = interaction.followup.send if foi_deferido else interaction.response.send_message
 
+    if await verificar_preso(bot, interaction, enviar, moeda_emoji):
+        return
+
     print(f"[CRASH DEBUG] criar_lobby_crash acessado por {jogador.id} com input: '{valor_input}'")
     reg_user = await bot.db.fetchrow('SELECT carteira, banco FROM users WHERE id = $1', jogador.id)
     carteira = reg_user['carteira'] if reg_user and reg_user['carteira'] else 0
@@ -510,6 +534,9 @@ async def criar_lobby_crash(bot, interaction: discord.Interaction, jogador: disc
 
 async def processar_lancamento_crash(bot, interaction: discord.Interaction, jogador: discord.Member, aposta: int, moeda_emoji: str):
     print(f"[CRASH DEBUG] processar_lancamento_crash acessado por {jogador.id}. Aposta repassada: {aposta}")
+    if await verificar_preso(bot, interaction, interaction.response.send_message, moeda_emoji):
+        return
+
     if hasattr(bot, 'roubos_ativos') and jogador.id in bot.roubos_ativos:
         return await interaction.response.send_message("❌ Você não pode lançar o foguete enquanto estiver cometendo um assalto!", ephemeral=True)
     if hasattr(bot, 'cooldown_deposito') and jogador.id in bot.cooldown_deposito:
@@ -552,6 +579,9 @@ async def processar_lancamento_crash(bot, interaction: discord.Interaction, joga
 async def processar_aposta(bot, interaction: discord.Interaction, valor_input: str, prob_vitoria: int, multiplicador: float, moeda_emoji: str):
     foi_deferido = interaction.response.is_done()
     enviar = interaction.followup.send if foi_deferido else interaction.response.send_message
+
+    if await verificar_preso(bot, interaction, enviar, moeda_emoji):
+        return
 
     if hasattr(bot, 'roubos_ativos') and interaction.user.id in bot.roubos_ativos:
         return await enviar("❌ Você está focado no crime agora! Termine o seu assalto antes de tentar a sorte.", ephemeral=True)
@@ -785,6 +815,20 @@ class ApostarCog(commands.Cog):
         app_commands.Choice(name="Foguetinho (Crash)", value="crash")
     ])
     async def apostar(self, interaction: discord.Interaction, modalidade: app_commands.Choice[str] = None, valor: str = None):
+        if hasattr(self.bot, 'presos') and interaction.user.id in self.bot.presos:
+            dados_preso = self.bot.presos[interaction.user.id]
+            embed_preso = discord.Embed(
+                title="🚓 Mãos ao alto!",
+                description=(
+                    f"Você está preso e não pode cometer crimes ou apostar!\n\n"
+                    f"Para ser liberado, você deve pagar uma restituição de **{dados_preso['divida']:,}** {self.moeda_emoji} para <@{dados_preso['vitima_id']}>.\n"
+                    f"O valor será debitado do seu **Banco**."
+                ).replace(',', '.'),
+                color=discord.Color.dark_red()
+            )
+            view_fianca = ViewFianca(self.bot, interaction.user.id, dados_preso['vitima_id'], dados_preso['divida'], self.moeda_emoji)
+            return await interaction.response.send_message(embed=embed_preso, view=view_fianca, ephemeral=True)
+
         if not modalidade:
             embed = discord.Embed(
                 title="🎲 Cassino da Entidade",

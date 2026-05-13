@@ -198,6 +198,34 @@ class SeletorCargosAdministrativos(discord.ui.RoleSelect):
         else:
             await interaction.response.send_message("✅ Sistema de Auto-Role desativado (Nenhum cargo selecionado).", ephemeral=True)
 
+class SeletorCanalNotificacoesAdmin(discord.ui.ChannelSelect):
+    def __init__(self):
+        super().__init__(
+            placeholder="Selecione o canal para logs de administração...",
+            channel_types=[discord.ChannelType.text]
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if not interaction.permissions.administrator:
+            return await interaction.response.send_message("❌ Apenas administradores podem alterar configurações.", ephemeral=True)
+
+        canal_selecionado = self.values[0]
+        guild_id = interaction.guild.id
+
+        await interaction.client.db.execute(
+            'UPDATE servers SET canal_notificacoes_admin = $1 WHERE id = $2',
+            canal_selecionado.id, guild_id
+        )
+
+        if not hasattr(interaction.client, 'cache_canal_notificacoes_admin'):
+            interaction.client.cache_canal_notificacoes_admin = {}
+        interaction.client.cache_canal_notificacoes_admin[guild_id] = canal_selecionado.id
+
+        await interaction.response.send_message(
+            f"📢 **Configuração Atualizada:** O canal de notificações de administração agora é {canal_selecionado.mention}.", 
+            ephemeral=True
+        )
+
 # ==========================================
 # 2. O BOTÃO DE ATUALIZAÇÃO
 # ==========================================
@@ -305,6 +333,9 @@ class ConfiguracoesLayout(discord.ui.LayoutView):
         container.add_item(discord.ui.TextDisplay(content="## 🛡️ Cargos de Administração (Auto-Role)\nSelecione os cargos que darão automaticamente a tag de 'Administração' a um membro (caso ele perca todos os selecionados, a tag é removida):"))
         container.add_item(discord.ui.ActionRow(SeletorCargosAdministrativos()))
 
+        container.add_item(discord.ui.TextDisplay(content="## 📢 Canal de Notificações de Administração\nSelecione o canal para onde os avisos de promoção e rebaixamento serão enviados:"))
+        container.add_item(discord.ui.ActionRow(SeletorCanalNotificacoesAdmin()))
+
         # --- SEÇÃO DE FERRAMENTAS DO DEV ---
         container.add_item(discord.ui.TextDisplay(content="## 🛠️ Ferramentas de Desenvolvedor\nUse 'Recarregar' se alterou a lógica do código. Use 'Sincronizar' apenas se mudou os comandos de barra (slash)."))
         container.add_item(discord.ui.ActionRow(BotaoRecarregar(bot), BotaoSyncSimples(bot)))
@@ -338,14 +369,46 @@ class Configuracoes(commands.Cog):
         guild_id = after.guild.id
         
         # 1. Busca no banco de dados quais são os cargos configurados como administrativos
-        registro = await self.bot.db.fetchrow('SELECT cargos_administrativos FROM servers WHERE id = $1', guild_id)
+        registro = await self.bot.db.fetchrow('SELECT cargos_administrativos, canal_notificacoes_admin FROM servers WHERE id = $1', guild_id)
         
         # Se não houver configuração ou a lista estiver vazia, não faz nada
         if not registro or not registro['cargos_administrativos']:
             return
 
         cargos_admin_configurados = registro['cargos_administrativos']
+        canal_notificacoes_id = registro['canal_notificacoes_admin'] if 'canal_notificacoes_admin' in registro else None
         
+        # Envia notificações de ganho/perda de cargos
+        if canal_notificacoes_id:
+            canal_notificacoes = after.guild.get_channel(canal_notificacoes_id)
+            if canal_notificacoes:
+                cargos_adicionados = [cargo for cargo in after.roles if cargo not in before.roles and cargo.id in cargos_admin_configurados]
+                cargos_removidos = [cargo for cargo in before.roles if cargo not in after.roles and cargo.id in cargos_admin_configurados]
+
+                for cargo in cargos_adicionados:
+                    embed = discord.Embed(
+                        title="Nova promoção!",
+                        description=f"{after.mention} agora é {cargo.mention}",
+                        color=cargo.color
+                    )
+                    embed.set_author(name=after.name)
+                    embed.set_thumbnail(url=after.display_avatar.url)
+                    try:
+                        await canal_notificacoes.send(embed=embed)
+                    except discord.Forbidden:
+                        pass
+
+                for cargo in cargos_removidos:
+                    embed = discord.Embed(
+                        description=f"{after.mention} não é mais {cargo.mention}",
+                        color=cargo.color
+                    )
+                    embed.set_author(name=after.name, icon_url=after.display_avatar.url)
+                    try:
+                        await canal_notificacoes.send(embed=embed)
+                    except discord.Forbidden:
+                        pass
+
         # O ID Fixo do cargo de "Administração" que você pediu
         cargo_alvo_id = 1000948452496244736
         cargo_alvo = after.guild.get_role(cargo_alvo_id)
