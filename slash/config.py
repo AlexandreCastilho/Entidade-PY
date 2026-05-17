@@ -61,6 +61,32 @@ class SeletorCargoSilenciado(discord.ui.RoleSelect):
             ephemeral=True
         )
 
+class SeletorCargoNotificacoesSorteios(discord.ui.RoleSelect):
+    def __init__(self):
+        super().__init__(
+            placeholder="Selecione o cargo de notificações de sorteios/rifas...",
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if not interaction.permissions.administrator:
+            return await interaction.response.send_message("❌ Apenas administradores podem alterar configurações.", ephemeral=True)
+
+        cargo_selecionado = self.values[0]
+        guild_id = int(interaction.guild.id)
+
+        try:
+            await interaction.client.db.execute(
+                'UPDATE servers SET cargo_notificacoes_sorteios = $1 WHERE id = $2',
+                cargo_selecionado.id, guild_id
+            )
+        except Exception as e:
+            print(f"🚨 [ERRO NO CONFIG]: {e}")
+
+        await interaction.response.send_message(
+            f"📢 **Configuração Atualizada:** O cargo de notificações de sorteios agora é {cargo_selecionado.mention}.", 
+            ephemeral=True
+        )
+
 class SeletorCanalDenuncia(discord.ui.ChannelSelect):
     def __init__(self):
         super().__init__(
@@ -322,6 +348,9 @@ class ConfiguracoesLayout(discord.ui.LayoutView):
         
         container.add_item(discord.ui.TextDisplay(content="## Cargo de Silenciamento\nEste é o cargo que será atribuído a membros silenciados:"))
         container.add_item(discord.ui.ActionRow(SeletorCargoSilenciado()))
+
+        container.add_item(discord.ui.TextDisplay(content="## Cargo de Notificações (Sorteios e Rifas)\nEste cargo será atribuído/removido pelos botões nos sorteios e rifas:"))
+        container.add_item(discord.ui.ActionRow(SeletorCargoNotificacoesSorteios()))
 
         container.add_item(discord.ui.TextDisplay(content="## Canal de registro de punições\nEste é o canal para onde são enviados automaticamente os registros de punições."))
         container.add_item(discord.ui.ActionRow(SeletorCanalRegistroPunicoes()))

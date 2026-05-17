@@ -70,7 +70,7 @@ class RifaLayoutView(discord.ui.LayoutView):
         container.add_item(discord.ui.TextDisplay(content=texto_info))
         container.add_item(discord.ui.Separator())
         
-        container.add_item(discord.ui.ActionRow(BotaoComprarTicket(), BotaoMinhasChances()))
+        container.add_item(discord.ui.ActionRow(BotaoComprarTicket(), BotaoMinhasChances(), BotaoNotificacoesRifa()))
         
         self.add_item(container)
 
@@ -115,9 +115,35 @@ class RifaLayoutViewDisabled(discord.ui.LayoutView):
         container.add_item(discord.ui.Separator())
         
         btn_comprar = discord.ui.Button(label="Rifa Encerrada", style=discord.ButtonStyle.secondary, emoji="🔒", disabled=True)
-        container.add_item(discord.ui.ActionRow(btn_comprar))
+        container.add_item(discord.ui.ActionRow(btn_comprar, BotaoNotificacoesRifa()))
         
         self.add_item(container)
+
+# ==========================================
+# O BOTÃO DE NOTIFICAÇÕES (RIFAS)
+# ==========================================
+class BotaoNotificacoesRifa(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="Habilitar / Desabilitar Notificações de Sorteios", style=discord.ButtonStyle.secondary, emoji="🔔", custom_id="btn_toggle_notificacoes_rifa")
+
+    async def callback(self, interaction: discord.Interaction):
+        reg = await interaction.client.db.fetchrow('SELECT cargo_notificacoes_sorteios FROM servers WHERE id = $1', interaction.guild.id)
+        if not reg or not reg.get('cargo_notificacoes_sorteios'):
+            return await interaction.response.send_message("❌ O cargo de notificações não foi configurado neste servidor. Peça a um administrador para configurar em `/configurações`.", ephemeral=True)
+        
+        cargo = interaction.guild.get_role(reg['cargo_notificacoes_sorteios'])
+        if not cargo:
+            return await interaction.response.send_message("❌ O cargo de notificações configurado não existe mais no servidor.", ephemeral=True)
+            
+        try:
+            if cargo in interaction.user.roles:
+                await interaction.user.remove_roles(cargo, reason="Desativou notificações de rifa.")
+                await interaction.response.send_message("🔕 **Notificações desativadas!** Você não receberá mais marcações de novos sorteios e rifas.", ephemeral=True)
+            else:
+                await interaction.user.add_roles(cargo, reason="Ativou notificações de rifa.")
+                await interaction.response.send_message("🔔 **Notificações ativadas!** Você será marcado quando novos sorteios e rifas começarem.", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.response.send_message("❌ A Entidade não tem permissão para gerenciar este cargo. Verifique a hierarquia de cargos.", ephemeral=True)
 
 # ==========================================
 # 1. MODAL DE COMPRA
@@ -195,7 +221,7 @@ class ModalCompraTicket(discord.ui.Modal, title="🎟️ Comprar Tickets"):
 # ==========================================
 class BotaoComprarTicket(discord.ui.Button):
     def __init__(self):
-        super().__init__(label="Comprar Tickets", style=discord.ButtonStyle.blurple, emoji="🎟️", custom_id="btn_comprar_rifa_v1")
+        super().__init__(label="Participar do Sorteio", style=discord.ButtonStyle.blurple, emoji="🎟️", custom_id="btn_comprar_rifa_v1")
 
     async def callback(self, interaction: discord.Interaction):
         bot = interaction.client
@@ -247,6 +273,7 @@ class RifasCog(commands.Cog):
         view_listener = discord.ui.View(timeout=None)
         view_listener.add_item(BotaoComprarTicket())
         view_listener.add_item(BotaoMinhasChances())
+        view_listener.add_item(BotaoNotificacoesRifa())
         self.bot.add_view(view_listener)
 
     @property

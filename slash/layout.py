@@ -1,6 +1,9 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
+import json
+import copy
+import io
 
 # ==========================================
 # 1. MODAIS BÁSICOS (Criação de Blocos)
@@ -67,6 +70,41 @@ class ModalBotaoLinkLayout(discord.ui.Modal, title='Adicionar Botão de Link'):
         self.view_pai.atualizar_interface()
         await interaction.response.edit_message(view=self.view_pai)
 
+class ModalSectionLayout(discord.ui.Modal, title='Adicionar Seção c/ Thumbnail'):
+    conteudo = discord.ui.TextInput(
+        label='Texto da Seção', 
+        style=discord.TextStyle.paragraph, 
+        placeholder='Deixe em branco para uma miniatura "sem texto"...',
+        required=False, 
+        max_length=2000
+    )
+    url_thumb = discord.ui.TextInput(
+        label='URL da Thumbnail', 
+        placeholder='https://...', 
+        required=True
+    )
+
+    def __init__(self, view_pai):
+        super().__init__()
+        self.view_pai = view_pai
+
+    async def on_submit(self, interaction: discord.Interaction):
+        url = self.url_thumb.value.strip()
+        if not url.startswith(('http://', 'https://', 'attachment://')):
+            return await interaction.response.send_message("❌ A URL precisa começar com http://, https:// ou attachment://", ephemeral=True)
+
+        texto = self.conteudo.value.strip()
+        if not texto:
+            texto = "\u200b"
+
+        self.view_pai.adicionar_elemento({
+            'tipo': 'section',
+            'content': texto,
+            'url_thumb': url
+        })
+        self.view_pai.atualizar_interface()
+        await interaction.response.edit_message(view=self.view_pai)
+
 class ModalCorLayout(discord.ui.Modal, title='Editar Cor do Container'):
     cor_hex = discord.ui.TextInput(
         label='Cor em formato HEX (ex: #FF0000)', 
@@ -106,7 +144,6 @@ class ModalCorLayout(discord.ui.Modal, title='Editar Cor do Container'):
 # ==========================================
 
 class ModalImportarLayout(discord.ui.Modal, title='Importar Layout Existente'):
-    id_canal = discord.ui.TextInput(label='ID do Canal', placeholder='Onde a mensagem está...', required=True)
     id_mensagem = discord.ui.TextInput(label='ID da Mensagem', placeholder='ID da mensagem...', required=True)
 
     def __init__(self, view_pai):
@@ -116,7 +153,7 @@ class ModalImportarLayout(discord.ui.Modal, title='Importar Layout Existente'):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         try:
-            canal = self.view_pai.bot.get_channel(int(self.id_canal.value)) or await self.view_pai.bot.fetch_channel(int(self.id_canal.value))
+            canal = self.view_pai.bot.get_channel(self.view_pai.canal_destino.id) or await self.view_pai.bot.fetch_channel(self.view_pai.canal_destino.id)
             mensagem = await canal.fetch_message(int(self.id_mensagem.value))
             
             elementos_importados = []
@@ -160,6 +197,22 @@ class ModalImportarLayout(discord.ui.Modal, title='Importar Layout Existente'):
                                 'url': comp.url, 'emoji': str(comp.emoji) if comp.emoji else None
                             })
                             
+                    elif 'Section' in nome_classe:
+                        texto = ""
+                        url_thumb = ""
+                        if hasattr(comp, 'children'):
+                            for child in comp.children:
+                                if 'TextDisplay' in child.__class__.__name__:
+                                    texto = getattr(child, 'content', '') or getattr(child, 'text', '')
+                                    break
+                        if hasattr(comp, 'accessory') and comp.accessory:
+                            acc = comp.accessory
+                            if 'Thumbnail' in acc.__class__.__name__:
+                                url_thumb = getattr(acc, 'url', getattr(acc, 'media', ''))
+                                if isinstance(url_thumb, discord.Attachment): url_thumb = url_thumb.url
+                        if texto and url_thumb:
+                            destino.append({'tipo': 'section', 'content': texto, 'url_thumb': str(url_thumb)})
+                            
                     # Se for ActionRow, podemos entrar para buscar os blocos
                     elif hasattr(comp, 'children') and 'Container' not in nome_classe:
                         extrair_blocos(comp.children, destino)
@@ -187,7 +240,6 @@ class ModalImportarLayout(discord.ui.Modal, title='Importar Layout Existente'):
             await interaction.followup.send(f"❌ Falha ao importar. Verifique os IDs.\n`{e}`", ephemeral=True)
 
 class ModalEditarLayout(discord.ui.Modal, title='Editar Mensagem do Bot'):
-    id_canal = discord.ui.TextInput(label='ID do Canal', placeholder='Onde a mensagem está...', required=True)
     id_mensagem = discord.ui.TextInput(label='ID da Mensagem', placeholder='ID da mensagem que o bot enviou...', required=True)
 
     def __init__(self, view_pai):
@@ -197,7 +249,7 @@ class ModalEditarLayout(discord.ui.Modal, title='Editar Mensagem do Bot'):
     async def on_submit(self, interaction: discord.Interaction):
         await interaction.response.defer(ephemeral=True)
         try:
-            canal = self.view_pai.bot.get_channel(int(self.id_canal.value)) or await self.view_pai.bot.fetch_channel(int(self.id_canal.value))
+            canal = self.view_pai.bot.get_channel(self.view_pai.canal_destino.id) or await self.view_pai.bot.fetch_channel(self.view_pai.canal_destino.id)
             mensagem = await canal.fetch_message(int(self.id_mensagem.value))
             
             if mensagem.author.id != self.view_pai.bot.user.id:
@@ -244,6 +296,80 @@ class ModalWebhookLayout(discord.ui.Modal, title='Enviar para Webhook'):
             
         except Exception as e:
             await interaction.followup.send(f"❌ Erro na conexão com o Webhook:\n`{e}`", ephemeral=True)
+
+class ModalImportarJSONLayout(discord.ui.Modal, title='Importar Layout via JSON'):
+    codigo_json = discord.ui.TextInput(
+        label='Código JSON',
+        style=discord.TextStyle.paragraph,
+        placeholder='Cole aqui o JSON exportado...',
+        required=True
+    )
+
+    def __init__(self, view_pai):
+        super().__init__()
+        self.view_pai = view_pai
+
+    async def on_submit(self, interaction: discord.Interaction):
+        try:
+            dados = json.loads(self.codigo_json.value)
+            
+            # Se o usuário colar o JSON inteiro de uma mensagem (como o do Discohook), nós extraímos os componentes.
+            if isinstance(dados, dict) and 'components' in dados:
+                dados = dados['components']
+                
+            if not isinstance(dados, list):
+                return await interaction.response.send_message("❌ O JSON deve ser uma lista de componentes ou um objeto contendo 'components'.", ephemeral=True)
+            
+            def parse_json_input(elementos):
+                resultado = []
+                for el in elementos:
+                    if not isinstance(el, dict): continue
+                    
+                    # 1. Formato interno (gerado pelo botão Exportar JSON do bot)
+                    if 'tipo' in el:
+                        novo_el = copy.copy(el)
+                        if 'cor' in novo_el and isinstance(novo_el['cor'], int):
+                            novo_el['cor'] = discord.Color(novo_el['cor'])
+                        if 'elementos' in novo_el:
+                            novo_el['elementos'] = parse_json_input(novo_el['elementos'])
+                        resultado.append(novo_el)
+                        
+                    # 2. Formato nativo do Discord (Discohook, JSON bruto)
+                    elif 'type' in el:
+                        t = el['type']
+                        if t == 17:
+                            cor_val = el.get('accent_color') or el.get('accent_colour')
+                            cor_obj = discord.Color(cor_val) if isinstance(cor_val, int) else discord.Color.blurple()
+                            resultado.append({'tipo': 'container', 'cor': cor_obj, 'elementos': parse_json_input(el.get('components', []))})
+                        elif t == 10:
+                            if el.get('content'): resultado.append({'tipo': 'texto', 'content': el.get('content')})
+                        elif t == 14:
+                            resultado.append({'tipo': 'separador'})
+                        elif t == 12:
+                            for item in el.get('items', []):
+                                url = item.get('media', {}).get('url')
+                                if url: resultado.append({'tipo': 'media', 'url': url})
+                        elif t == 9:
+                            texto = next((f.get('content', '') for f in el.get('components', []) if f.get('type') == 10), '')
+                            url_thumb = el.get('accessory', {}).get('media', {}).get('url', '')
+                            if texto or url_thumb: resultado.append({'tipo': 'section', 'content': texto, 'url_thumb': url_thumb})
+                        elif t == 1:
+                            for filho in el.get('components', []):
+                                if filho.get('type') == 2 and filho.get('style') == 5:
+                                    emoji = filho.get('emoji', {})
+                                    resultado.append({'tipo': 'botao_link', 'label': filho.get('label', ''), 'url': filho.get('url', ''), 'emoji': emoji.get('name') if isinstance(emoji, dict) else None})
+                return resultado
+                
+            self.view_pai.layout_data = parse_json_input(dados)
+            self.view_pai.alvo_atual = -1
+            self.view_pai.atualizar_interface()
+            
+            await interaction.response.edit_message(view=self.view_pai)
+            await interaction.followup.send("✅ Layout importado via JSON com sucesso!", ephemeral=True)
+        except json.JSONDecodeError:
+            await interaction.response.send_message("❌ Formato JSON inválido. Verifique se colou corretamente.", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ Erro ao processar JSON: {e}", ephemeral=True)
 
 
 # ==========================================
@@ -301,6 +427,12 @@ def preencher_container_com_elementos(target, elementos):
                 i += 1
 
             target.add_item(action_row)
+            
+        elif tipo == 'section':
+            sec_ui = discord.ui.Section(accessory=discord.ui.Thumbnail(media=el['url_thumb']))
+            sec_ui.add_item(discord.ui.TextDisplay(content=el['content']))
+            target.add_item(sec_ui)
+            i += 1
         else:
             # Tipo desconhecido, avança para evitar loop infinito
             i += 1
@@ -320,7 +452,13 @@ class SeletorCanalLayout(discord.ui.ChannelSelect):
     def __init__(self, pai):
         super().__init__(
             placeholder="Selecione o canal de destino...", 
-            channel_types=[discord.ChannelType.text, discord.ChannelType.news]
+            channel_types=[
+                discord.ChannelType.text, 
+                discord.ChannelType.news,
+                discord.ChannelType.public_thread,
+                discord.ChannelType.private_thread,
+                discord.ChannelType.news_thread
+            ]
         )
         self.pai = pai
 
@@ -382,20 +520,41 @@ class MenuSelecionarAlvo(discord.ui.Select):
         self.pai.atualizar_interface()
         await interaction.response.edit_message(view=self.pai)
 
-class MenuAcoesAlvo(discord.ui.Select):
+class MenuEditarAlvo(discord.ui.Select):
     def __init__(self, pai):
         self.pai = pai
         options = [
+            discord.SelectOption(label="Novo Container", description="Janela colorida para agrupar blocos", value="container", emoji="🪟"),
+            discord.SelectOption(label="Bloco de Texto", description="Insere texto no alvo atual", value="texto", emoji="📝"),
+            discord.SelectOption(label="Seção c/ Thumbnail", description="Texto acompanhado de uma miniatura", value="section", emoji="📰"),
+            discord.SelectOption(label="Bloco Separador", description="Linha divisória", value="separador", emoji="➖"),
+            discord.SelectOption(label="Bloco de Mídia", description="Imagem ou vídeo", value="media", emoji="🖼️"),
+            discord.SelectOption(label="Botão de Link", description="Botão que redireciona para um site", value="botao_link", emoji="🔗"),
             discord.SelectOption(label="Remover Último", description="Desfazer a última adição no alvo", value="rem_ultimo", emoji="🔙"),
             discord.SelectOption(label="Limpar Alvo", description="Apaga tudo dentro do alvo atual", value="limpar_alvo", emoji="🗑️"),
         ]
         if pai.alvo_atual != -1:
+            options.append(discord.SelectOption(label="Mudar Cor do Container", description="Altera a cor deste container", value="mudar_cor", emoji="🎨"))
             options.append(discord.SelectOption(label="Deletar Este Container", description="Exclui o container inteiro", value="del_container", emoji="🧨"))
-        super().__init__(placeholder="Ações Rápidas no Alvo...", options=options)
+            
+        super().__init__(placeholder="Editar Alvo...", options=options)
 
     async def callback(self, interaction: discord.Interaction):
         val = self.values[0]
-        if val == "rem_ultimo":
+        if val == "container":
+            self.pai.layout_data.append({'tipo': 'container', 'cor': discord.Color.blurple(), 'elementos': []})
+            self.pai.alvo_atual = len(self.pai.layout_data) - 1
+            self.pai.atualizar_interface()
+            await interaction.response.edit_message(view=self.pai)
+        elif val == "texto": await interaction.response.send_modal(ModalTextoLayout(self.pai))
+        elif val == "section": await interaction.response.send_modal(ModalSectionLayout(self.pai))
+        elif val == "separador":
+            self.pai.adicionar_elemento({'tipo': 'separador'})
+            self.pai.atualizar_interface()
+            await interaction.response.edit_message(view=self.pai)
+        elif val == "media": await interaction.response.send_modal(ModalMediaLayout(self.pai))
+        elif val == "botao_link": await interaction.response.send_modal(ModalBotaoLinkLayout(self.pai))
+        elif val == "rem_ultimo":
             if self.pai.alvo_atual == -1:
                 if self.pai.layout_data: self.pai.layout_data.pop()
             else:
@@ -403,6 +562,8 @@ class MenuAcoesAlvo(discord.ui.Select):
                     target_list = self.pai.layout_data[self.pai.alvo_atual]['elementos']
                     if target_list: target_list.pop()
                 except (IndexError, KeyError): pass
+            self.pai.atualizar_interface()
+            await interaction.response.edit_message(view=self.pai)
         elif val == "limpar_alvo":
             if self.pai.alvo_atual == -1:
                 self.pai.layout_data.clear()
@@ -410,31 +571,18 @@ class MenuAcoesAlvo(discord.ui.Select):
                 try:
                     self.pai.layout_data[self.pai.alvo_atual]['elementos'].clear()
                 except (IndexError, KeyError): pass
+            self.pai.atualizar_interface()
+            await interaction.response.edit_message(view=self.pai)
         elif val == "del_container":
             if self.pai.alvo_atual != -1:
                 try:
                     self.pai.layout_data.pop(self.pai.alvo_atual)
                     self.pai.alvo_atual = -1
                 except IndexError: pass
-        
-        self.pai.atualizar_interface()
-        await interaction.response.edit_message(view=self.pai)
-
-class MenuAvancado(discord.ui.Select):
-    def __init__(self, pai):
-        self.pai = pai
-        options = [
-            discord.SelectOption(label="Importar Modelo", description="Importa um layout de outra mensagem", value="importar", emoji="📥"),
-            discord.SelectOption(label="Editar Existente", description="Edita uma mensagem do bot", value="editar", emoji="🔧"),
-            discord.SelectOption(label="Enviar via Webhook", description="Enviar como outro bot", value="webhook", emoji="🪝"),
-        ]
-        super().__init__(placeholder="Ferramentas Avançadas...", options=options)
-
-    async def callback(self, interaction: discord.Interaction):
-        val = self.values[0]
-        if val == "importar": await interaction.response.send_modal(ModalImportarLayout(self.pai))
-        elif val == "editar": await interaction.response.send_modal(ModalEditarLayout(self.pai))
-        elif val == "webhook": await interaction.response.send_modal(ModalWebhookLayout(self.pai))
+            self.pai.atualizar_interface()
+            await interaction.response.edit_message(view=self.pai)
+        elif val == "mudar_cor":
+            await interaction.response.send_modal(ModalCorLayout(self.pai))
 
 class ConstrutorLayoutView(discord.ui.LayoutView):
     def __init__(self, bot, dono_id):
@@ -487,44 +635,93 @@ class ConstrutorLayoutView(discord.ui.LayoutView):
         alvo_nome = "Raiz (Fora dos Containers)" if self.alvo_atual == -1 else f"Container {self._get_container_number(self.alvo_atual)}"
         self.add_item(discord.ui.TextDisplay(content=f"**🛠️ CONSTRUTOR DE LAYOUT** | 🎯 **Alvo Atual:** {alvo_nome}"))
 
-        # --- Linha 1: Ferramentas de Adição e Alvo ---
-        linha_add = discord.ui.ActionRow()
-        linha_add.add_item(MenuAdicionarElemento(self))
-        self.add_item(linha_add)
-        
+        # --- Linha 1: Seletor de Alvo ---
         linha_alvo = discord.ui.ActionRow()
         linha_alvo.add_item(MenuSelecionarAlvo(self))
         self.add_item(linha_alvo)
 
-        # --- Linha 2: Ações do Alvo e Cor ---
-        linha_acoes = discord.ui.ActionRow()
-        linha_acoes.add_item(MenuAcoesAlvo(self))
-        self.add_item(linha_acoes)
+        # --- Linha 2: Editar Alvo ---
+        linha_editar = discord.ui.ActionRow()
+        linha_editar.add_item(MenuEditarAlvo(self))
+        self.add_item(linha_editar)
 
-        linha_avancada = discord.ui.ActionRow()
-        btn_cor = discord.ui.Button(label="Mudar Cor (Apenas Container)", style=discord.ButtonStyle.secondary, emoji="🎨", disabled=(self.alvo_atual == -1))
-        btn_cor.callback = self.cb_cor
-        linha_avancada.add_item(btn_cor)
-        
-        btn_enviar = discord.ui.Button(label="Projetar Layout Final", style=discord.ButtonStyle.success, emoji="🚀")
-        btn_enviar.callback = self.cb_enviar
-        linha_avancada.add_item(btn_enviar)
-        
-        self.add_item(linha_avancada)
-
-        # --- Linha 3: Ferramentas Avançadas ---
-        linha_avancada2 = discord.ui.ActionRow()
-        linha_avancada2.add_item(MenuAvancado(self))
-        self.add_item(linha_avancada2)
-
-        # --- Linha 4: Seletor de Canal ---
+        # --- Linha 3: Seletor de Canal ---
         linha_canal = discord.ui.ActionRow()
         linha_canal.add_item(SeletorCanalLayout(self))
         self.add_item(linha_canal)
 
+        # --- Linha 4: Importações e Exportações ---
+        linha_acoes_1 = discord.ui.ActionRow()
+        
+        btn_importar = discord.ui.Button(label="Importar Mensagem", style=discord.ButtonStyle.secondary, emoji="📥")
+        btn_importar.callback = self.cb_importar
+        linha_acoes_1.add_item(btn_importar)
+        
+        btn_importar_json = discord.ui.Button(label="Importar JSON", style=discord.ButtonStyle.secondary, emoji="📥")
+        btn_importar_json.callback = self.cb_importar_json
+        linha_acoes_1.add_item(btn_importar_json)
+        
+        btn_exportar_json = discord.ui.Button(label="Exportar JSON", style=discord.ButtonStyle.secondary, emoji="📤")
+        btn_exportar_json.callback = self.cb_exportar_json
+        linha_acoes_1.add_item(btn_exportar_json)
+        
+        self.add_item(linha_acoes_1)
+
+        # --- Linha 5: Botões Finais ---
+        linha_acoes_2 = discord.ui.ActionRow()
+
+        btn_enviar = discord.ui.Button(label="Enviar mensagem", style=discord.ButtonStyle.success, emoji="📨")
+        btn_enviar.callback = self.cb_enviar
+        linha_acoes_2.add_item(btn_enviar)
+
+        btn_webhook = discord.ui.Button(label="Enviar via Webhook", style=discord.ButtonStyle.blurple, emoji="🪝")
+        btn_webhook.callback = self.cb_webhook
+        linha_acoes_2.add_item(btn_webhook)
+        
+        btn_editar = discord.ui.Button(label="Editar Mensagem Existente", style=discord.ButtonStyle.secondary, emoji="🔧")
+        btn_editar.callback = self.cb_editar
+        linha_acoes_2.add_item(btn_editar)
+
+        self.add_item(linha_acoes_2)
+
     # --- CALLBACKS DOS BOTÕES ---
-    async def cb_cor(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(ModalCorLayout(self))
+    async def cb_importar(self, interaction: discord.Interaction):
+        if not self.canal_destino:
+            return await interaction.response.send_message("❌ Selecione um canal de destino no menu acima antes de importar um modelo.", ephemeral=True)
+        await interaction.response.send_modal(ModalImportarLayout(self))
+
+    async def cb_editar(self, interaction: discord.Interaction):
+        if not self.canal_destino:
+            return await interaction.response.send_message("❌ Selecione um canal de destino no menu acima antes de editar uma mensagem.", ephemeral=True)
+        await interaction.response.send_modal(ModalEditarLayout(self))
+
+    async def cb_webhook(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(ModalWebhookLayout(self))
+
+    async def cb_importar_json(self, interaction: discord.Interaction):
+        await interaction.response.send_modal(ModalImportarJSONLayout(self))
+
+    async def cb_exportar_json(self, interaction: discord.Interaction):
+        if not self.layout_data:
+            return await interaction.response.send_message("❌ O layout está vazio.", ephemeral=True)
+            
+        def dict_to_json(elementos):
+            lista = []
+            for el in elementos:
+                novo_el = copy.copy(el)
+                if 'cor' in novo_el and isinstance(novo_el['cor'], discord.Color):
+                    novo_el['cor'] = novo_el['cor'].value
+                if 'elementos' in novo_el:
+                    novo_el['elementos'] = dict_to_json(novo_el['elementos'])
+                lista.append(novo_el)
+            return lista
+            
+        json_str = json.dumps(dict_to_json(self.layout_data), indent=2)
+        if len(json_str) > 1900:
+            arquivo = discord.File(io.BytesIO(json_str.encode('utf-8')), filename='layout.json')
+            await interaction.response.send_message("✅ Aqui está o arquivo JSON do seu layout:", file=arquivo, ephemeral=True)
+        else:
+            await interaction.response.send_message(f"✅ Aqui está o JSON do seu layout:\n```json\n{json_str}\n```", ephemeral=True)
 
     async def cb_enviar(self, interaction: discord.Interaction):
         if not self.canal_destino:
@@ -532,7 +729,7 @@ class ConstrutorLayoutView(discord.ui.LayoutView):
         if not self.layout_data:
             return await interaction.response.send_message("❌ O layout está vazio! Adicione algo antes de enviar.", ephemeral=True)
 
-        canal_real = interaction.guild.get_channel(self.canal_destino.id)
+        canal_real = interaction.guild.get_channel(self.canal_destino.id) or interaction.guild.get_thread(self.canal_destino.id)
         if not canal_real:
             return await interaction.response.send_message("❌ Canal não encontrado.", ephemeral=True)
 

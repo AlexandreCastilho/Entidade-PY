@@ -27,6 +27,8 @@ class AutoRoleCondicional(commands.Cog):
         self.CARGO_RECRUTADOR_LYRA = 1000948443923107872
 
         self.CARGOS_RECRUTADORES = [self.CARGO_RECRUATDOR_ORION, self.CARGO_RECRUTADOR_AQUILA, self.CARGO_RECRUTADOR_ANDROMEDA, self.CARGO_RECRUTADOR_LYRA]
+        
+        self.CARGO_SORTEIOS = 1483261926443192430
 
 
     async def adicionar_ou_remover_cargo_recrutador_cla(self, member: discord.Member):
@@ -126,6 +128,16 @@ class AutoRoleCondicional(commands.Cog):
             await self.adicionar_ou_remover_cargo_membro(after)
             
             await self.adicionar_ou_remover_cargo_recrutador_cla(after)
+
+    # Gatilho 2: Quando um membro entra no servidor
+    @commands.Cog.listener()
+    async def on_member_join(self, member: discord.Member):
+        if member.bot:
+            return
+        try:
+            await member.add_roles(discord.Object(id=self.CARGO_SORTEIOS), reason="Auto-role: O membro entrou no servidor e recebeu o cargo de Sorteios.")
+        except discord.Forbidden:
+            pass
 
 async def setup(bot):
     await bot.add_cog(AutoRoleCondicional(bot))

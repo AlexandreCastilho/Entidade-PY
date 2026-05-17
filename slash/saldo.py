@@ -323,7 +323,7 @@ async def executar_roubo(bot, interaction: discord.Interaction, alvo_id: int, mo
         vitima_data_pre = await bot.db.fetchrow('SELECT carteira FROM users WHERE id = $1', alvo_id)
         v_carteira_pre = vitima_data_pre['carteira'] if vitima_data_pre else 0
 
-        chance_sucesso = 80.0
+        chance_sucesso = 75.0
 
         embed_aviso = criar_embed_erro(
             interaction.user, 
@@ -385,7 +385,7 @@ async def executar_roubo(bot, interaction: discord.Interaction, alvo_id: int, mo
             view.mensagem_original = msg
         else:
             rolagem_critica = random.uniform(0, 100)
-            if rolagem_critica <= 10.0:
+            if rolagem_critica <= 20.0:
                 valor_no_chao = valor_extraido
                 divida = valor_extraido * 3
                 
