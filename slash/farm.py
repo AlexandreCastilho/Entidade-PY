@@ -5,6 +5,7 @@ import datetime
 import json
 import math
 import random
+import asyncio
 
 # ==========================================
 # FUNÇÕES AUXILIARES E LISTAS
@@ -85,6 +86,8 @@ class ViewResgateFarm(discord.ui.View):
         self.moeda_nome = moeda_nome
         self.moeda_emoji = moeda_emoji
         self.mensagem_original = None
+        self.resgatado = False
+        self.lock = asyncio.Lock()
 
     async def on_timeout(self):
         for child in self.children:
@@ -100,77 +103,85 @@ class ViewResgateFarm(discord.ui.View):
 
     @discord.ui.button(label="Resgatar Carga", style=discord.ButtonStyle.green, emoji="📦")
     async def btn_resgatar(self, interaction: discord.Interaction, button: discord.ui.Button):
-        # 1. Calcular o tempo exato decorrido
-        agora = datetime.datetime.now(datetime.timezone.utc)
-        segundos_passados = (agora - self.finish_time).total_seconds()
-        minutos_passados = segundos_passados / 60.0
+        async with self.lock:
+            if self.resgatado:
+                return await interaction.response.send_message("❌ Alguém foi mais rápido e já resgatou esta carga!", ephemeral=True)
 
-        is_dono = interaction.user.id == self.dono_id
+            # 1. Calcular o tempo exato decorrido
+            agora = datetime.datetime.now(datetime.timezone.utc)
+            segundos_passados = (agora - self.finish_time).total_seconds()
+            minutos_passados = segundos_passados / 60.0
 
-        # 2. Lógica do Roubo / Escudo
-        if not is_dono and minutos_passados <= 1.0:
-            return await interaction.response.send_message(
-                embed=criar_embed_erro(interaction.user, "❌ O escudo de contenção ainda está ativo! Apenas o dono do drone pode acessar a carga neste primeiro minuto."), 
-                ephemeral=True
-            )
+            is_dono = interaction.user.id == self.dono_id
 
-        # 3. Lógica de Decaimento
-        if minutos_passados <= 1.0:
-            ganho_final = self.ganho_maximo
-        elif minutos_passados >= 10.0:
-            ganho_final = 0
-        else:
-            fracao = 1.0 - ((minutos_passados - 1.0) / 9.0)
-            ganho_final = math.floor(self.ganho_maximo * fracao)
+            # 2. Lógica do Roubo / Escudo
+            if not is_dono and minutos_passados <= 1.0:
+                return await interaction.response.send_message(
+                    embed=criar_embed_erro(interaction.user, "❌ O escudo de contenção ainda está ativo! Apenas o dono do drone pode acessar a carga neste primeiro minuto."), 
+                    ephemeral=True
+                )
 
-        if ganho_final <= 0:
+            self.resgatado = True
+
+            # 3. Lógica de Decaimento
+            if minutos_passados <= 1.0:
+                ganho_final = self.ganho_maximo
+            elif minutos_passados >= 10.0:
+                ganho_final = 0
+            else:
+                fracao = 1.0 - ((minutos_passados - 1.0) / 9.0)
+                ganho_final = math.floor(self.ganho_maximo * fracao)
+
+            if ganho_final <= 0:
+                for child in self.children:
+                    child.disabled = True
+                embed = interaction.message.embeds[0]
+                embed.color = discord.Color.dark_gray()
+                embed.add_field(name="💀 Carga Perdida", value="Você demorou demais e não sobrou nada da carga para resgatar.", inline=False)
+                await interaction.response.edit_message(view=self, embed=embed)
+                self.stop()
+                return
+
+            # 4. Atualiza a Carteira no BD (Com registro de crime se for roubo)
+            if is_dono:
+                await self.bot.db.execute(
+                    '''INSERT INTO users (id, carteira) VALUES ($1, $2)
+                       ON CONFLICT (id) DO UPDATE SET carteira = users.carteira + EXCLUDED.carteira''',
+                    interaction.user.id, ganho_final
+                )
+            else:
+                # Se não é o dono, é roubo! Soma na carteira e no total_roubado
+                await self.bot.db.execute(
+                    '''INSERT INTO users (id, carteira, total_roubado) VALUES ($1, $2, $3)
+                       ON CONFLICT (id) DO UPDATE SET 
+                       carteira = users.carteira + EXCLUDED.carteira,
+                       total_roubado = COALESCE(users.total_roubado, 0) + EXCLUDED.total_roubado''',
+                    interaction.user.id, ganho_final, ganho_final
+                )
+                # Verifica se essa ousadia deu a ele a coroa do submundo
+                await verificar_rei_dos_ladroes(self.bot, interaction)
+
+            # 5. Atualiza a interface
             for child in self.children:
                 child.disabled = True
+                
             embed = interaction.message.embeds[0]
-            embed.color = discord.Color.dark_gray()
-            embed.add_field(name="💀 Carga Perdida", value="Você demorou demais e não sobrou nada da carga para resgatar.", inline=False)
-            return await interaction.response.edit_message(view=self, embed=embed)
-
-        # 4. Atualiza a Carteira no BD (Com registro de crime se for roubo)
-        if is_dono:
-            await self.bot.db.execute(
-                '''INSERT INTO users (id, carteira) VALUES ($1, $2)
-                   ON CONFLICT (id) DO UPDATE SET carteira = users.carteira + EXCLUDED.carteira''',
-                interaction.user.id, ganho_final
-            )
-        else:
-            # Se não é o dono, é roubo! Soma na carteira e no total_roubado
-            await self.bot.db.execute(
-                '''INSERT INTO users (id, carteira, total_roubado) VALUES ($1, $2, $3)
-                   ON CONFLICT (id) DO UPDATE SET 
-                   carteira = users.carteira + EXCLUDED.carteira,
-                   total_roubado = COALESCE(users.total_roubado, 0) + EXCLUDED.total_roubado''',
-                interaction.user.id, ganho_final, ganho_final
-            )
-            # Verifica se essa ousadia deu a ele a coroa do submundo
-            await verificar_rei_dos_ladroes(self.bot, interaction)
-
-        # 5. Atualiza a interface
-        for child in self.children:
-            child.disabled = True
             
-        embed = interaction.message.embeds[0]
-        
-        perda = self.ganho_maximo - ganho_final
-        if perda > 0:
-            detalhe_perda = f"\n⚠️ Devido à demora ({minutos_passados:.1f} min), **{perda}** {self.moeda_nome} foram perdidos no vácuo."
-        else:
-            detalhe_perda = "\n⚡ Resgate instantâneo perfeito! Carga máxima garantida."
+            perda = self.ganho_maximo - ganho_final
+            if perda > 0:
+                detalhe_perda = f"\n⚠️ Devido à demora ({minutos_passados:.1f} min), **{perda}** {self.moeda_nome} foram perdidos no vácuo."
+            else:
+                detalhe_perda = "\n⚡ Resgate instantâneo perfeito! Carga máxima garantida."
 
-        if is_dono:
-            embed.color = discord.Color.brand_green()
-            embed.add_field(name="✅ Resgate Bem-sucedido", value=f"Você transferiu **{ganho_final}** {self.moeda_emoji} para sua carteira.{detalhe_perda}", inline=False)
-        else:
-            embed.color = discord.Color.dark_red()
-            embed.add_field(name="🏴‍☠️ Carga Roubada!", value=f"{interaction.user.mention} hackeou o terminal e roubou **{ganho_final}** {self.moeda_emoji} que pertenciam ao drone!{detalhe_perda}", inline=False)
-        
-        await interaction.response.edit_message(view=self, embed=embed)
-        self.stop() 
+            if is_dono:
+                embed.color = discord.Color.brand_green()
+                embed.add_field(name="✅ Resgate Bem-sucedido", value=f"Você transferiu **{ganho_final}** {self.moeda_emoji} para sua carteira.{detalhe_perda}", inline=False)
+            else:
+                embed.color = discord.Color.dark_red()
+                embed.add_field(name="🏴‍☠️ Carga Roubada!", value=f"{interaction.user.mention} hackeou o terminal e roubou **{ganho_final}** {self.moeda_emoji} que pertenciam ao drone!{detalhe_perda}", inline=False)
+            
+            await interaction.response.edit_message(view=self, embed=embed)
+            self.stop() 
 
 
 # ==========================================

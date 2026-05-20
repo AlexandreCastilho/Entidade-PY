@@ -70,18 +70,35 @@ class ModalBotaoLinkLayout(discord.ui.Modal, title='Adicionar Botão de Link'):
         self.view_pai.atualizar_interface()
         await interaction.response.edit_message(view=self.view_pai)
 
-class ModalSectionLayout(discord.ui.Modal, title='Adicionar Seção c/ Thumbnail'):
+class ModalSectionLayout(discord.ui.Modal, title='Adicionar Seção c/ Thumb e Botão'):
     conteudo = discord.ui.TextInput(
         label='Texto da Seção', 
         style=discord.TextStyle.paragraph, 
-        placeholder='Deixe em branco para uma miniatura "sem texto"...',
+        placeholder='Deixe em branco para ignorar texto...',
         required=False, 
         max_length=2000
     )
     url_thumb = discord.ui.TextInput(
         label='URL da Thumbnail', 
-        placeholder='https://...', 
-        required=True
+        placeholder='https://... (Opcional)', 
+        required=False
+    )
+    btn_label = discord.ui.TextInput(
+        label='Texto do Botão', 
+        placeholder='Deixe em branco para não ter botão...',
+        required=False,
+        max_length=80
+    )
+    btn_url = discord.ui.TextInput(
+        label='URL do Botão', 
+        placeholder='https://... (Requer Texto do Botão)', 
+        required=False
+    )
+    btn_emoji = discord.ui.TextInput(
+        label='Emoji do Botão (Opcional)', 
+        placeholder='(ex: 🔗)',
+        required=False, 
+        max_length=2
     )
 
     def __init__(self, view_pai):
@@ -90,18 +107,43 @@ class ModalSectionLayout(discord.ui.Modal, title='Adicionar Seção c/ Thumbnail
 
     async def on_submit(self, interaction: discord.Interaction):
         url = self.url_thumb.value.strip()
-        if not url.startswith(('http://', 'https://', 'attachment://')):
-            return await interaction.response.send_message("❌ A URL precisa começar com http://, https:// ou attachment://", ephemeral=True)
+        if url and not url.startswith(('http://', 'https://', 'attachment://')):
+            return await interaction.response.send_message("❌ A URL da miniatura precisa começar com http://, https:// ou attachment://", ephemeral=True)
 
         texto = self.conteudo.value.strip()
         if not texto:
             texto = "\u200b"
 
-        self.view_pai.adicionar_elemento({
+        elemento = {
             'tipo': 'section',
-            'content': texto,
-            'url_thumb': url
-        })
+            'content': texto
+        }
+        if url:
+            elemento['url_thumb'] = url
+        
+        btn_url_val = self.btn_url.value.strip()
+        btn_label_val = self.btn_label.value.strip()
+        
+        if btn_label_val or btn_url_val:
+            if not btn_url_val:
+                return await interaction.response.send_message("❌ Você forneceu um texto para o botão, mas esqueceu a URL.", ephemeral=True)
+
+            if not btn_url_val.startswith(('http://', 'https://')):
+                return await interaction.response.send_message("❌ A URL do botão deve começar com http:// ou https://", ephemeral=True)
+
+            if url:
+                return await interaction.response.send_message(
+                    "❌ **Limitação do Discord:** Uma `Seção` não pode ter uma Thumbnail e um Botão ao mesmo tempo. Remova a URL da Thumbnail para poder adicionar o botão.", 
+                    ephemeral=True
+                )
+
+            elemento['botao'] = {
+                'label': btn_label_val or "Link",
+                'url': btn_url_val,
+                'emoji': self.btn_emoji.value.strip() if self.btn_emoji.value.strip() else None
+            }
+
+        self.view_pai.adicionar_elemento(elemento)
         self.view_pai.atualizar_interface()
         await interaction.response.edit_message(view=self.view_pai)
 
@@ -200,18 +242,38 @@ class ModalImportarLayout(discord.ui.Modal, title='Importar Layout Existente'):
                     elif 'Section' in nome_classe:
                         texto = ""
                         url_thumb = ""
+                        botao_dict = None
                         if hasattr(comp, 'children'):
                             for child in comp.children:
                                 if 'TextDisplay' in child.__class__.__name__:
                                     texto = getattr(child, 'content', '') or getattr(child, 'text', '')
-                                    break
+                                elif 'ActionRow' in child.__class__.__name__:
+                                    for sub_child in child.children:
+                                        if 'Button' in sub_child.__class__.__name__ and getattr(sub_child, 'style', None) == discord.ButtonStyle.link and getattr(sub_child, 'url', None):
+                                            botao_dict = {
+                                                'label': sub_child.label,
+                                                'url': sub_child.url,
+                                                'emoji': str(sub_child.emoji) if sub_child.emoji else None
+                                            }
+                                            break
+                                elif 'Button' in child.__class__.__name__ and getattr(child, 'style', None) == discord.ButtonStyle.link and getattr(child, 'url', None):
+                                    botao_dict = {
+                                        'label': child.label,
+                                        'url': child.url,
+                                        'emoji': str(child.emoji) if child.emoji else None
+                                    }
                         if hasattr(comp, 'accessory') and comp.accessory:
                             acc = comp.accessory
                             if 'Thumbnail' in acc.__class__.__name__:
                                 url_thumb = getattr(acc, 'url', getattr(acc, 'media', ''))
                                 if isinstance(url_thumb, discord.Attachment): url_thumb = url_thumb.url
-                        if texto and url_thumb:
-                            destino.append({'tipo': 'section', 'content': texto, 'url_thumb': str(url_thumb)})
+                        if texto or url_thumb:
+                            sec_obj = {'tipo': 'section', 'content': texto}
+                            if url_thumb:
+                                sec_obj['url_thumb'] = str(url_thumb)
+                            if botao_dict:
+                                sec_obj['botao'] = botao_dict
+                            destino.append(sec_obj)
                             
                     # Se for ActionRow, podemos entrar para buscar os blocos
                     elif hasattr(comp, 'children') and 'Container' not in nome_classe:
@@ -352,7 +414,30 @@ class ModalImportarJSONLayout(discord.ui.Modal, title='Importar Layout via JSON'
                         elif t == 9:
                             texto = next((f.get('content', '') for f in el.get('components', []) if f.get('type') == 10), '')
                             url_thumb = el.get('accessory', {}).get('media', {}).get('url', '')
-                            if texto or url_thumb: resultado.append({'tipo': 'section', 'content': texto, 'url_thumb': url_thumb})
+                            sec_dict = {}
+                            if texto or url_thumb: 
+                                sec_dict = {'tipo': 'section', 'content': texto, 'url_thumb': url_thumb}
+                            for filho in el.get('components', []):
+                                if filho.get('type') == 1:
+                                    for sub_filho in filho.get('components', []):
+                                        if sub_filho.get('type') == 2 and sub_filho.get('style') == 5:
+                                            emoji = sub_filho.get('emoji', {})
+                                            sec_dict['botao'] = {
+                                                'label': sub_filho.get('label', ''),
+                                                'url': sub_filho.get('url', ''),
+                                                'emoji': emoji.get('name') if isinstance(emoji, dict) else None
+                                            }
+                                            break
+                                elif filho.get('type') == 2 and filho.get('style') == 5:
+                                    emoji = filho.get('emoji', {})
+                                    sec_dict['botao'] = {
+                                        'label': filho.get('label', ''),
+                                        'url': filho.get('url', ''),
+                                        'emoji': emoji.get('name') if isinstance(emoji, dict) else None
+                                    }
+                                    break
+                            if sec_dict:
+                                resultado.append(sec_dict)
                         elif t == 1:
                             for filho in el.get('components', []):
                                 if filho.get('type') == 2 and filho.get('style') == 5:
@@ -429,8 +514,19 @@ def preencher_container_com_elementos(target, elementos):
             target.add_item(action_row)
             
         elif tipo == 'section':
-            sec_ui = discord.ui.Section(accessory=discord.ui.Thumbnail(media=el['url_thumb']))
+            sec_kwargs = {}
+            if 'url_thumb' in el and el['url_thumb']:
+                sec_kwargs['accessory'] = discord.ui.Thumbnail(media=el['url_thumb'])
+            elif 'botao' in el:
+                btn_data = el['botao']
+                sec_kwargs['accessory'] = discord.ui.Button(
+                    label=btn_data.get('label'), style=discord.ButtonStyle.link,
+                    url=btn_data.get('url'), emoji=btn_data.get('emoji')
+                )
+                
+            sec_ui = discord.ui.Section(**sec_kwargs)
             sec_ui.add_item(discord.ui.TextDisplay(content=el['content']))
+
             target.add_item(sec_ui)
             i += 1
         else:
@@ -472,6 +568,7 @@ class MenuAdicionarElemento(discord.ui.Select):
         options = [
             discord.SelectOption(label="Novo Container", description="Janela colorida para agrupar blocos", value="container", emoji="🪟"),
             discord.SelectOption(label="Bloco de Texto", description="Insere texto no alvo atual", value="texto", emoji="📝"),
+            discord.SelectOption(label="Seção c/ Thumb e Botão", description="Texto acompanhado de miniatura e botão", value="section", emoji="📰"),
             discord.SelectOption(label="Bloco Separador", description="Linha divisória", value="separador", emoji="➖"),
             discord.SelectOption(label="Bloco de Mídia", description="Imagem ou vídeo", value="media", emoji="🖼️"),
             discord.SelectOption(label="Botão de Link", description="Botão que redireciona para um site", value="botao_link", emoji="🔗"),
@@ -486,6 +583,7 @@ class MenuAdicionarElemento(discord.ui.Select):
             self.pai.atualizar_interface()
             await interaction.response.edit_message(view=self.pai)
         elif val == "texto": await interaction.response.send_modal(ModalTextoLayout(self.pai))
+        elif val == "section": await interaction.response.send_modal(ModalSectionLayout(self.pai))
         elif val == "separador":
             self.pai.adicionar_elemento({'tipo': 'separador'})
             self.pai.atualizar_interface()
@@ -526,7 +624,7 @@ class MenuEditarAlvo(discord.ui.Select):
         options = [
             discord.SelectOption(label="Novo Container", description="Janela colorida para agrupar blocos", value="container", emoji="🪟"),
             discord.SelectOption(label="Bloco de Texto", description="Insere texto no alvo atual", value="texto", emoji="📝"),
-            discord.SelectOption(label="Seção c/ Thumbnail", description="Texto acompanhado de uma miniatura", value="section", emoji="📰"),
+            discord.SelectOption(label="Seção c/ Thumb e Botão", description="Texto com miniatura e botão (opcional)", value="section", emoji="📰"),
             discord.SelectOption(label="Bloco Separador", description="Linha divisória", value="separador", emoji="➖"),
             discord.SelectOption(label="Bloco de Mídia", description="Imagem ou vídeo", value="media", emoji="🖼️"),
             discord.SelectOption(label="Botão de Link", description="Botão que redireciona para um site", value="botao_link", emoji="🔗"),

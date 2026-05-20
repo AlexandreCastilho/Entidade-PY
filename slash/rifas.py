@@ -36,7 +36,7 @@ def converter_tempo(tempo_str: str) -> datetime.timedelta:
 # LAYOUT VIEW V2.0 DA RIFA
 # ==========================================
 class RifaLayoutView(discord.ui.LayoutView):
-    def __init__(self, premio: str, descricao: str, preco_ticket: int, total_tickets: int, imagem_url: str, autor_id: int, doador_id: int, vencedores: int, timestamp: int, rifa_id: int, moeda_emoji: str):
+    def __init__(self, premio: str, descricao: str, preco_ticket: int, total_tickets: int, imagem_url: str, autor_id: int, doador_id: int, vencedores: int, timestamp: int, rifa_id: int, moeda_emoji: str, limite_por_user: int = None):
         super().__init__(timeout=None)
         
         container = discord.ui.Container(accent_color=discord.Color.purple())
@@ -62,6 +62,8 @@ class RifaLayoutView(discord.ui.LayoutView):
             
         texto_info += f"**Vencedores:** {vencedores}\n"
         texto_info += f"**Preço por Ticket:** {preco_ticket:,} {moeda_emoji}\n".replace(',', '.')
+        if limite_por_user:
+            texto_info += f"**Limite por Usuário:** {limite_por_user}\n"
         texto_info += f"**Tickets Vendidos:** {total_tickets:,}\n".replace(',', '.')
         texto_info += f"**Termina:** <t:{timestamp}:R>\n"
         texto_info += f"*(ID da Rifa: {rifa_id})*\n\n"
@@ -75,7 +77,7 @@ class RifaLayoutView(discord.ui.LayoutView):
         self.add_item(container)
 
 class RifaLayoutViewDisabled(discord.ui.LayoutView):
-    def __init__(self, premio: str, descricao: str, preco_ticket: int, total_tickets: int, imagem_url: str, autor_id: int, doador_id: int, vencedores: int, timestamp: int, rifa_id: int, vencedores_ids: list, moeda_emoji: str):
+    def __init__(self, premio: str, descricao: str, preco_ticket: int, total_tickets: int, imagem_url: str, autor_id: int, doador_id: int, vencedores: int, timestamp: int, rifa_id: int, vencedores_ids: list, moeda_emoji: str, limite_por_user: int = None):
         super().__init__(timeout=None)
         
         container = discord.ui.Container(accent_color=discord.Color.dark_theme())
@@ -101,6 +103,8 @@ class RifaLayoutViewDisabled(discord.ui.LayoutView):
             
         texto_info += f"**Vencedores:** {vencedores}\n"
         texto_info += f"**Preço por Ticket:** {preco_ticket:,} {moeda_emoji}\n".replace(',', '.')
+        if limite_por_user:
+            texto_info += f"**Limite por Usuário:** {limite_por_user}\n"
         texto_info += f"**Tickets Vendidos:** {total_tickets:,}\n".replace(',', '.')
         texto_info += f"**Terminou em:** <t:{timestamp}:f>\n"
         texto_info += f"*(ID da Rifa: {rifa_id})*\n"
@@ -156,12 +160,13 @@ class ModalCompraTicket(discord.ui.Modal, title="🎟️ Comprar Tickets"):
         max_length=5
     )
 
-    def __init__(self, bot, rifa, mensagem_rifa, moeda_emoji):
+    def __init__(self, bot, rifa, mensagem_rifa, moeda_emoji, limite_por_user):
         super().__init__()
         self.bot = bot
         self.rifa = rifa
         self.mensagem_rifa = mensagem_rifa
         self.moeda_emoji = moeda_emoji
+        self.limite_por_user = limite_por_user
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -169,6 +174,24 @@ class ModalCompraTicket(discord.ui.Modal, title="🎟️ Comprar Tickets"):
             if quantidade <= 0: raise ValueError
         except ValueError:
             return await interaction.response.send_message("❌ Por favor, digite um número inteiro maior que zero.", ephemeral=True)
+
+        aviso_ajuste = ""
+        if self.limite_por_user:
+            tickets_atuais = await self.bot.db.fetchval(
+                'SELECT quantidade FROM rifas_tickets WHERE rifa_id = $1 AND user_id = $2',
+                self.rifa['id'], interaction.user.id
+            ) or 0
+            
+            if (tickets_atuais + quantidade) > self.limite_por_user:
+                restantes = self.limite_por_user - tickets_atuais
+                if restantes > 0:
+                    quantidade = restantes
+                    aviso_ajuste = f"\n⚠️ *A quantidade foi ajustada para **{restantes}** para respeitar o seu limite.*"
+                else:
+                    return await interaction.response.send_message(
+                        f"❌ Você já atingiu o limite de **{self.limite_por_user}** tickets para esta rifa.",
+                        ephemeral=True
+                    )
 
         custo_total = quantidade * self.rifa['preco_ticket']
 
@@ -186,7 +209,7 @@ class ModalCompraTicket(discord.ui.Modal, title="🎟️ Comprar Tickets"):
             ON CONFLICT (rifa_id, user_id) DO UPDATE SET quantidade = rifas_tickets.quantidade + EXCLUDED.quantidade
         ''', self.rifa['id'], interaction.user.id, quantidade)
 
-        await interaction.response.send_message(f"🎉 Pagamento aprovado! Você adquiriu **{quantidade}** tickets por **{custo_total:,}** {self.moeda_emoji}.".replace(',', '.'), ephemeral=True)
+        await interaction.response.send_message(f"🎉 Pagamento aprovado! Você adquiriu **{quantidade}** tickets por **{custo_total:,}** {self.moeda_emoji}.{aviso_ajuste}".replace(',', '.'), ephemeral=True)
 
         total_tickets = await self.bot.db.fetchval('SELECT SUM(quantidade) FROM rifas_tickets WHERE rifa_id = $1', self.rifa['id'])
         total_tickets = total_tickets or 0
@@ -211,7 +234,8 @@ class ModalCompraTicket(discord.ui.Modal, title="🎟️ Comprar Tickets"):
                 vencedores=dados.get('vencedores', 1),
                 timestamp=dados.get('timestamp', 0),
                 rifa_id=rifa_completa['id'],
-                moeda_emoji=self.moeda_emoji
+                moeda_emoji=self.moeda_emoji,
+                limite_por_user=self.limite_por_user
             )
             await self.mensagem_rifa.edit(view=nova_view, embed=None)
 
@@ -230,8 +254,17 @@ class BotaoComprarTicket(discord.ui.Button):
         if not rifa or rifa['status'] != 'aberta':
             return await interaction.response.send_message("❌ Esta rifa já foi encerrada ou não existe mais.", ephemeral=True)
 
+        tarefa = await bot.db.fetchrow("SELECT dados_extras FROM tarefas_agendadas WHERE mensagem_id = $1 AND tipo = 'rifa'", interaction.message.id)
+        limite = None
+        if tarefa and tarefa['dados_extras']:
+            try:
+                dados = json.loads(tarefa['dados_extras'])
+                limite = dados.get('limite_por_user')
+            except (json.JSONDecodeError, KeyError):
+                pass
+
         emoji_uc = discord.utils.get(bot.emojis, name="UCreditos") or "💎"
-        await interaction.response.send_modal(ModalCompraTicket(bot, rifa, interaction.message, emoji_uc))
+        await interaction.response.send_modal(ModalCompraTicket(bot, rifa, interaction.message, emoji_uc, limite))
 
 class BotaoMinhasChances(discord.ui.Button):
     def __init__(self):
@@ -313,7 +346,8 @@ class RifasCog(commands.Cog):
                     timestamp=dados.get('timestamp', 0),
                     rifa_id=rifa['id'],
                     vencedores_ids=[],
-                    moeda_emoji=self.moeda_emoji
+                    moeda_emoji=self.moeda_emoji,
+                    limite_por_user=dados.get('limite_por_user')
                 )
                 await mensagem.edit(view=nova_view, embed=None)
                 await canal.send(f"⚠️ A Rifa do prêmio **{rifa['premio']}** foi encerrada, mas ninguém comprou tickets.")
@@ -350,7 +384,8 @@ class RifasCog(commands.Cog):
                 timestamp=dados.get('timestamp', 0),
                 rifa_id=rifa['id'],
                 vencedores_ids=vencedores_ids,
-                moeda_emoji=self.moeda_emoji
+                moeda_emoji=self.moeda_emoji,
+                limite_por_user=dados.get('limite_por_user')
             )
             await mensagem.edit(view=nova_view, embed=None)
 
@@ -389,11 +424,15 @@ class RifasCog(commands.Cog):
         imagem_url="[OPCIONAL] Link de uma imagem para ilustrar a rifa",
         vencedores="Quantidade de ganhadores",
         doador="Membro que doou o prêmio (opcional)",
-        canal="Canal onde a rifa será enviada (padrão: atual)"
+        canal="Canal onde a rifa será enviada (padrão: atual)",
+        limite_por_user="[OPCIONAL] Limite máximo de tickets por participante"
     )
-    async def criar_rifa(self, interaction: discord.Interaction, premio: str, tempo: str, preco_ticket: int, descricao: str = None, imagem_url: str = None, vencedores: int = 1, doador: discord.Member = None, canal: discord.TextChannel = None):
+    async def criar_rifa(self, interaction: discord.Interaction, premio: str, tempo: str, preco_ticket: int, descricao: str = None, imagem_url: str = None, vencedores: int = 1, doador: discord.Member = None, canal: discord.TextChannel = None, limite_por_user: int = None):
         if preco_ticket <= 0:
             return await interaction.response.send_message("❌ O preço do ticket deve ser maior que zero.", ephemeral=True)
+            
+        if limite_por_user is not None and limite_por_user <= 0:
+            return await interaction.response.send_message("❌ O limite de tickets deve ser maior que zero.", ephemeral=True)
 
         delta = converter_tempo(tempo)
         if not delta:
@@ -416,7 +455,8 @@ class RifasCog(commands.Cog):
             vencedores=vencedores,
             timestamp=timestamp,
             rifa_id=0,
-            moeda_emoji=self.moeda_emoji
+            moeda_emoji=self.moeda_emoji,
+            limite_por_user=limite_por_user
         )
         
         try:
@@ -441,7 +481,8 @@ class RifasCog(commands.Cog):
             vencedores=vencedores,
             timestamp=timestamp,
             rifa_id=rifa_id,
-            moeda_emoji=self.moeda_emoji
+            moeda_emoji=self.moeda_emoji,
+            limite_por_user=limite_por_user
         )
         await msg.edit(view=view_atualizada)
 
@@ -453,7 +494,8 @@ class RifasCog(commands.Cog):
             "autor_id": interaction.user.id,
             "doador_id": doador.id if doador else None,
             "vencedores": vencedores,
-            "timestamp": timestamp
+            "timestamp": timestamp,
+            "limite_por_user": limite_por_user
         })
 
         await self.bot.db.execute(

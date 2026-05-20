@@ -275,7 +275,9 @@ class BotaoListaComandos(discord.ui.Button):
             "• `/depositar` - Guarda seus UCréditos em segurança no banco.\n"
             "• `/sacar` - Retira seus UCréditos do banco para a carteira.\n"
             "• `/transferir` - Transfere UCréditos do seu banco para o banco de outro membro.\n\n"
-            "**Gastos & Mercado:**\n"
+            "**Farm, Gastos & Mercado:**\n"
+            "• `/farm` - Envia um drone extrator para buscar UCréditos.\n"
+            "• `/raid` - Inicia uma incursão cooperativa multiplayer para farmar UCréditos.\n"
             "• `/loja` - Abre o mercado para comprar melhorias e cargos exclusivos.\n"
             "• `/caridade` - Doe sua fortuna para nivelar os membros mais pobres do servidor.\n\n"
             "**O Submundo & Cassino:**\n"
@@ -388,6 +390,7 @@ class GuiaLayout3(discord.ui.LayoutView):
             "- **O sistema é feito para os casuais**: Se você ficar uma horinha no canal de voz enquanto joga Warframe com a galera, você já ganha 70% do limite diário do farm de UCréditos em calls. Assim você não fica muito atrás de quem fica o dia todo.\n"
             "- **É fácil enriquecer rápido**! Basta depositar seus UCréditos no banco. O dinheiro na sua carteira pode ser roubado por outros usuários. **Para nunca ser roubado**, basta `/depositar` no chat <#1000948732235362325> ao sair de uma call ou ao parar de conversar por mensagens nos chats.\n"
             "- Compre um **booster** na loja se você costuma passar pelo menos uma hora por dia conversando.\n"
+            "- As missões de **Raid** são muito lucrativas, tente organizar o esquadrão perfeito com jogadores que tenham Booster!\n"
             "- **Roube ladrões!** Se ver alguém roubando, roube o ladrão imediatamente. Se você for rápido o suficiente, ele não terá como se defender, e você ficará com o dinheiro dele e da vítima dele."
         )
         container.add_item(discord.ui.TextDisplay(content=texto_dicas))
